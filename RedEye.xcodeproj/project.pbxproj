@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1C41BA982DCCE1EA003B1627 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 1C41BA972DCCE1EA003B1627 /* KeyboardShortcuts */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		1C5875F12DCCBB4000061F5F /* RedEye.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RedEye.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -23,6 +27,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1C41BA982DCCE1EA003B1627 /* KeyboardShortcuts in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -65,6 +70,7 @@
 			);
 			name = RedEye;
 			packageProductDependencies = (
+				1C41BA972DCCE1EA003B1627 /* KeyboardShortcuts */,
 			);
 			productName = RedEye;
 			productReference = 1C5875F12DCCBB4000061F5F /* RedEye.app */;
@@ -94,6 +100,9 @@
 			);
 			mainGroup = 1C5875E82DCCBB4000061F5F;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				1C41BA962DCCE1EA003B1627 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1C5875F22DCCBB4000061F5F /* Products */;
 			projectDirPath = "";
@@ -319,6 +328,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		1C41BA962DCCE1EA003B1627 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sindresorhus/KeyboardShortcuts";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.3.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		1C41BA972DCCE1EA003B1627 /* KeyboardShortcuts */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1C41BA962DCCE1EA003B1627 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
+			productName = KeyboardShortcuts;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 1C5875E92DCCBB4000061F5F /* Project object */;
 }
