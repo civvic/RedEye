@@ -17,7 +17,11 @@ extension KeyboardShortcuts.Name {
 
 class HotkeyManager {
 
-    init() {
+    private let eventManager: EventManager // Add property for EventManager
+
+    // Modify init to accept an EventManager
+    init(eventManager: EventManager) {
+        self.eventManager = eventManager
         setupHotkeyListeners()
     }
 
@@ -32,65 +36,83 @@ class HotkeyManager {
     }
 
     private func handleCaptureSelectedTextHotkey() {
-        print("HotkeyManager: ⌘⇧C pressed! (via KeyboardShortcuts)")
         print("HotkeyManager: ⌘⇧C pressed! Attempting to capture selected text...")
 
-        // 1. Get the frontmost application
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             print("Error: Could not determine the frontmost application.")
+            // Optionally, emit an error event here if desired
+            // let errorEvent = RedEyeEvent(eventType: .textSelection, metadata: ["error": "Could not determine frontmost app"])
+            // eventManager.emit(event: errorEvent)
             return
         }
 
-        // Get the process identifier (PID) of the frontmost application
         let pid = frontmostApp.processIdentifier
-        
-        // 2. Create an AXUIElement for the frontmost application
         let appElement = AXUIElementCreateApplication(pid)
+        var focusedUIElement: AnyObject?
+        
+        // It's good practice to get app name and bundle ID here as well
+        let appName = frontmostApp.localizedName
+        let bundleId = frontmostApp.bundleIdentifier
 
-        // 3. Get the focused UI element from the application element
-        var focusedUIElement: AnyObject? // Needs to be AnyObject for AXUIElementCopyAttributeValue
         let focusError = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedUIElement)
 
         if focusError != .success {
             print("Error getting focused UI element: \(focusError.rawValue)")
-            // Common errors:
-            // -1 (errAPINotEnabled): Accessibility API is disabled (should be caught by our earlier check, but good to note)
-            // -25204 (errAXAPIDisabled) or -25212 (errAXPrivilegeNotGranted): More specific accessibility errors
-            // Other errors might mean the app doesn't support this attribute or is slow to respond.
+            let errorEvent = RedEyeEvent(
+                eventType: .textSelection,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                metadata: ["error": "Error getting focused UI element: \(focusError.rawValue)"]
+            )
+            eventManager.emit(event: errorEvent)
             return
         }
 
         guard let focusedElement = focusedUIElement else {
-            print("Error: Focused UI element is nil, even though no direct error was reported.")
+            print("Error: Focused UI element is nil.")
+            let errorEvent = RedEyeEvent(
+                eventType: .textSelection,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                metadata: ["error": "Focused UI element was nil after successful AX query."]
+            )
+            eventManager.emit(event: errorEvent)
             return
         }
 
-        // 4. Get the selected text from the focused UI element
         var selectedTextValue: AnyObject?
         let selectedTextError = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedTextValue)
-                                                            // Cast to AXUIElement is safe here if focusError was .success and focusedElement is not nil.
 
         if selectedTextError == .success {
-            if let selectedText = selectedTextValue as? String, !selectedText.isEmpty {
-                print("Selected text: \"\(selectedText)\"")
-            } else if selectedTextValue == nil || (selectedTextValue as? String)?.isEmpty ?? true {
-                // This case handles when the attribute exists but there's no text selected (e.g., empty string or nil value)
-                print("No text selected in the focused element, or element does not support kAXSelectedTextAttribute directly with content.")
+            let capturedText = selectedTextValue as? String // Can be nil or empty
+            
+            let event = RedEyeEvent(
+                eventType: .textSelection,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                contextText: capturedText?.isEmpty == false ? capturedText : nil // Store nil if empty for cleaner JSON
+            )
+            eventManager.emit(event: event)
+            
+            // For console feedback during dev, we can still print the direct outcome
+            if let text = capturedText, !text.isEmpty {
+                 print("Selected text captured: \"\(text)\"")
             } else {
-                // This case handles if selectedTextValue is something other than a String (e.g. NSAccessibilityNullValue)
-                 print("Focused element has kAXSelectedTextAttribute, but the value is not a non-empty string (possibly NSAccessibilityNullValue or an empty string). Value: \(String(describing: selectedTextValue))")
+                 print("No text selected or focused element provided no text.")
             }
+
         } else {
-            // If kAXSelectedTextAttribute is not available or an error occurs
-            print("Could not get selected text (focused element might not support it or no text is selected). Error: \(selectedTextError.rawValue)")
-            // Common errors:
-            // -25205 (errAXAttributeUnsupported): The element doesn't have a 'selected text' attribute.
-            // You might also want to try kAXValueAttribute for some elements if kAXSelectedTextAttribute fails,
-            // as some simple text fields might put their entire content in kAXValueAttribute if nothing specific is "selected".
-            // However, for "selected text", kAXSelectedTextAttribute is the primary one.
+            print("Could not get selected text. Error: \(selectedTextError.rawValue)")
+            let errorEvent = RedEyeEvent(
+                eventType: .textSelection,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                metadata: ["error": "Could not get selected text from focused element: \(selectedTextError.rawValue)"]
+            )
+            eventManager.emit(event: errorEvent)
         }
     }
-
+    
     // If you need to explicitly unregister (though KeyboardShortcuts often handles this well on deinit or app quit)
     // or manage them more dynamically, you might add methods here.
     // For this library, often just setting up the listener is enough, and it cleans up.
