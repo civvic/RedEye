@@ -72,7 +72,7 @@ class PluginActionsViewController: NSViewController {
     // MARK: - Actions
 
     @objc private func echoButtonAction(_ sender: NSButton) {
-        print("PluginActionsViewController: Echo button clicked.")
+        RedEyeLogger.info("Echo button clicked.", category: "PluginActionsViewController")
         delegate?.didClickPluginActionButton(sender: sender, contextText: currentContextText)
     }
     

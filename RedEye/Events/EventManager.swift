@@ -25,14 +25,14 @@ class EventManager {
         do {
             let jsonData = try jsonEncoder.encode(event)
             if let jsonString = String(data: jsonData, encoding: .utf8) {
-                print("--- RedEyeEvent Emitted ---")
-                print(jsonString)
-                print("---------------------------")
+                RedEyeLogger.info("--- RedEyeEvent Emitted ---", category: "EventManager")
+                RedEyeLogger.info(jsonString, category: "EventManager")
+                RedEyeLogger.info("---------------------------", category: "EventManager")
             } else {
-                print("EventManager Error: Could not convert JSON data to string.")
+                RedEyeLogger.error("Could not convert JSON data to string.", category: "EventManager")
             }
         } catch {
-            print("EventManager Error: Failed to encode RedEyeEvent to JSON: \(error.localizedDescription)")
+            RedEyeLogger.error("Failed to encode RedEyeEvent to JSON", category: "EventManager", error:error)
         }
 
         // 2. For now, EventManager only logs. Plugin invocation is handled by UIManager via UI.

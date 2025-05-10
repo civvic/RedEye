@@ -16,7 +16,7 @@ class PluginManager {
     // Computed property for the plugin directory URL
     private var pluginDirectoryURL: URL? {
         guard let appSupportURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            print("PluginManager Error: Could not find Application Support directory.")
+            RedEyeLogger.error("Could not find Application Support directory.", category: "PluginManager")
             return nil
         }
         let redEyeAppSupportURL = appSupportURL.appendingPathComponent("RedEye", isDirectory: true)
@@ -29,7 +29,7 @@ class PluginManager {
 
     private func discoverPlugins() {
         guard let dirURL = pluginDirectoryURL else {
-            print("PluginManager: Plugin directory URL is nil. Cannot discover plugins.")
+            RedEyeLogger.error("Plugin directory URL is nil. Cannot discover plugins.", category: "PluginManager")
             return
         }
 
@@ -40,10 +40,10 @@ class PluginManager {
         do {
             if !fileManager.fileExists(atPath: dirURL.path) {
                 try fileManager.createDirectory(at: dirURL, withIntermediateDirectories: true, attributes: nil)
-                print("PluginManager: Created plugin directory at \(dirURL.path)")
+                RedEyeLogger.info("Created plugin directory at \(dirURL.path)", category: "PluginManager")
             }
         } catch {
-            print("PluginManager Error: Could not create plugin directory at \(dirURL.path): \(error.localizedDescription)")
+            RedEyeLogger.error("Could not create plugin directory at \(dirURL.path)", category: "PluginManager", error: error)
             return // If we can't create/access it, no point proceeding
         }
 
@@ -61,25 +61,25 @@ class PluginManager {
             }
 
             if discoveredPluginURLs.isEmpty {
-                print("PluginManager: No plugins found (specifically 'echo_plugin.sh') in \(dirURL.path)")
+                RedEyeLogger.error("No plugins found (specifically 'echo_plugin.sh') in \(dirURL.path)", category: "PluginManager")
             } else {
-                print("PluginManager: Discovered plugins: \(discoveredPluginURLs.map { $0.lastPathComponent })")
+                RedEyeLogger.info("Discovered plugins: \(discoveredPluginURLs.map { $0.lastPathComponent })", category: "PluginManager")
             }
         } catch {
-            print("PluginManager Error: Could not read contents of plugin directory \(dirURL.path): \(error.localizedDescription)")
+            RedEyeLogger.error("Could not read contents of plugin directory \(dirURL.path): \(error.localizedDescription)", category: "PluginManager")
         }
     }
 
     func invokePlugins(withText text: String) {
         if discoveredPluginURLs.isEmpty {
-            print("PluginManager: No plugins to invoke.")
+            RedEyeLogger.info("No plugins to invoke.", category: "PluginManager")
             return
         }
 
-        print("PluginManager: Invoking plugins with text: \"\(text)\"")
+        RedEyeLogger.info("Invoking plugins with text: \"\(text)\"", category: "PluginManager")
 
         for pluginURL in discoveredPluginURLs {
-            print("PluginManager: Attempting to run plugin: \(pluginURL.path)")
+            RedEyeLogger.info("Attempting to run plugin: \(pluginURL.path)", category: "PluginManager")
             
             let process = Process()
             process.executableURL = pluginURL // The script itself is the executable
@@ -98,14 +98,14 @@ class PluginManager {
 
             do {
                 try process.run() // Launch the process
-                print("PluginManager: Launched \(pluginURL.lastPathComponent).")
+                RedEyeLogger.info("Launched \(pluginURL.lastPathComponent).", category:"PluginManager")
 
                 // Send the input text to the plugin's stdin
                 if let inputData = text.data(using: .utf8) {
                     inputPipe.fileHandleForWriting.write(inputData)
                     inputPipe.fileHandleForWriting.closeFile() // Close stdin to signal end of input
                 } else {
-                    print("PluginManager Error: Could not convert input text to data for plugin \(pluginURL.lastPathComponent).")
+                    RedEyeLogger.error("Could not convert input text to data for plugin \(pluginURL.lastPathComponent).", category:"PluginManager")
                 }
 
                 // Read output and error
@@ -113,18 +113,18 @@ class PluginManager {
                 let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
 
                 if let outputString = String(data: outputData, encoding: .utf8), !outputString.isEmpty {
-                    print("Plugin \(pluginURL.lastPathComponent) STDOUT:\n\(outputString.trimmingCharacters(in: .whitespacesAndNewlines))")
+                    RedEyeLogger.info("Plugin \(pluginURL.lastPathComponent) STDOUT:\n\(outputString.trimmingCharacters(in: .whitespacesAndNewlines))", category:"PluginManager")
                 }
                 if let errorString = String(data: errorData, encoding: .utf8), !errorString.isEmpty {
-                    print("Plugin \(pluginURL.lastPathComponent) STDERR:\n\(errorString.trimmingCharacters(in: .whitespacesAndNewlines))")
+                    RedEyeLogger.error("Plugin \(pluginURL.lastPathComponent) STDERR:\n\(errorString.trimmingCharacters(in: .whitespacesAndNewlines))", category:"PluginManager")
                 }
                 
                 process.waitUntilExit() // Wait for the process to complete
                 let exitStatus = process.terminationStatus
-                print("PluginManager: \(pluginURL.lastPathComponent) finished with status \(exitStatus).")
+                RedEyeLogger.info("\(pluginURL.lastPathComponent) finished with status \(exitStatus).", category:"PluginManager")
 
             } catch {
-                print("PluginManager Error: Failed to run plugin \(pluginURL.lastPathComponent): \(error.localizedDescription)")
+                RedEyeLogger.error("Failed to run plugin \(pluginURL.lastPathComponent)", category:"PluginManager", error:error)
             }
         }
     }

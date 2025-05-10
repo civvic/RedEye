@@ -31,11 +31,11 @@ class HotkeyManager {
         KeyboardShortcuts.onKeyUp(for: .captureSelectedText) { [weak self] in
             self?.handleCaptureSelectedTextHotkey()
         }
-        print("HotkeyManager: Listener for ⌘⇧C (captureSelectedText) is set up.")
+        RedEyeLogger.info("Listener for ⌘⇧C (captureSelectedText) is set up.", category: "HotKeyManager")
     }
 
     private func handleCaptureSelectedTextHotkey() {
-        print("HotkeyManager: ⌘⇧C pressed! Attempting to capture selected text...")
+        RedEyeLogger.info("⌘⇧C pressed! Attempting to capture selected text...", category: "HotKeyManager")
 
         // Get mouse location *before* any blocking accessibility calls
         let mouseLocation = NSEvent.mouseLocation // This is in screen coordinates
@@ -87,12 +87,12 @@ class HotkeyManager {
         // show the plugin actions panel.
         // We'll pass the capturedText (which can be nil). UIManager can decide what to do.
         if let textToShowInPanel = capturedText, !textToShowInPanel.isEmpty {
-            print("HotkeyManager: Captured text \"\(textToShowInPanel)\". Requesting UI panel.")
+            RedEyeLogger.info("Captured text \"\(textToShowInPanel)\". Requesting UI panel.", category: "HotKeyManager")
             uiManager.showPluginActionsPanel(near: mouseLocation, withContextText: textToShowInPanel)
         } else {
             // Decide if you want to show the panel even if no text is selected.
             // For PopClip, it usually only appears if there's a selection.
-            print("HotkeyManager: No text selected or error capturing. Not showing UI panel.")
+            RedEyeLogger.error("No text selected or error capturing. Not showing UI panel.", category: "HotKeyManager")
             // Or, to always show it and let UIManager/PluginActionsViewController decide:
             // uiManager.showPluginActionsPanel(near: mouseLocation, withContextText: nil)
         }

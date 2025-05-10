@@ -36,7 +36,7 @@ class PluginActionsPanel: NSPanel {
     // Override to handle Escape key if the panel is key.
     // If not key, this won't be called. We might need a global event monitor for Escape.
     override func cancelOperation(_ sender: Any?) {
-        print("PluginActionsPanel: cancelOperation called (Escape pressed if key window)")
+        RedEyeLogger.info("cancelOperation called (Escape pressed if key window)", category:"PluginActionsPanel")
         panelDelegate?.dismissPanel()
     }
     

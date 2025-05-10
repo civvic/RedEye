@@ -52,7 +52,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit RedEye", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
         
-        print("RedEye started. Status item should be visible.")
+        RedEyeLogger.info("RedEye application finished launching. Status item should be visible.", category: "AppDelegate")
+
+        // Enable verbose logging for DEBUG builds
+        #if DEBUG
+        RedEyeLogger.isVerboseLoggingEnabled = true
+        // Using a standard print here is acceptable as it's a one-time developer note during startup
+        print("RedEye Dev Note: Verbose debug logging is ENABLED (DEBUG build).")
+        RedEyeLogger.debug("This is a test debug message from AppDelegate.", category: "AppDelegate")
+        #else
+        // Using a standard print here for a release build note is also fine if desired
+        print("RedEye Info: Verbose debug logging is DISABLED (Release build).")
+        #endif
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
@@ -67,11 +78,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
         let accessEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
         if accessEnabled {
-            print("Accessibility permissions: Granted.")
+            RedEyeLogger.info("Accessibility permissions: Granted.", category: "AppDelegate")
             return true
         } else {
-            print("Accessibility permissions: Not granted. The user may have been prompted.")
-            print("Please grant Accessibility access to RedEye in System Settings > Privacy & Security > Accessibility, then relaunch the app if features aren't working.")
+            RedEyeLogger.error("Accessibility permissions: Not granted. The user may have been prompted.", category: "AppDelegate")
+            RedEyeLogger.error("Please grant Accessibility access to RedEye in System Settings > Privacy & Security > Accessibility, then relaunch the app if features aren't working.", category: "AppDelegate")
             // For this step, we rely on the system prompt. If it fails or the user denies,
             // they'll need to go to System Settings manually.
             return false

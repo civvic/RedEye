@@ -79,13 +79,13 @@ class UIManager: NSObject, PluginActionsPanelDelegate, PluginActionsViewControll
         pluginActionsPanel?.setFrameOrigin(NSPoint(x: panelX, y: panelY))
         pluginActionsPanel?.orderFrontRegardless() // Show the panel
         
-        print("UIManager: Showing plugin actions panel.")
+        RedEyeLogger.info("Showing plugin actions panel.", category: "UIManager")
     }
 
     func hidePluginActionsPanel() {
         pluginActionsPanel?.orderOut(nil) // Hide the panel
         self.currentContextTextForPanel = nil // Clear the stored text
-        print("UIManager: Hiding plugin actions panel.")
+        RedEyeLogger.info("Hiding plugin actions panel.", category: "UIManager")
     }
 
     // MARK: - PluginActionsPanelDelegate
@@ -98,11 +98,11 @@ class UIManager: NSObject, PluginActionsPanelDelegate, PluginActionsViewControll
     // MARK: - PluginActionsViewControllerDelegate
 
     func didClickPluginActionButton(sender: NSButton, contextText: String?) {
-        print("UIManager: Plugin action button clicked. Context: \(contextText ?? "nil")")
+        RedEyeLogger.info("UIManager: Plugin action button clicked. Context: \(contextText ?? "nil")", category: "UIManager")
         if let text = contextText, !text.isEmpty {
             pluginManager.invokePlugins(withText: text)
         } else {
-            print("UIManager: No context text to process for plugin.")
+            RedEyeLogger.info("No context text to process for plugin.", category:"UIManager")
         }
         hidePluginActionsPanel() // Hide panel after action
     }
