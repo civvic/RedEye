@@ -7,35 +7,41 @@
 
 import Cocoa
 import ApplicationServices
-//import Carbon.HIToolbox // For Carbon Event APIs like RegisterEventHotKey
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     
     var statusItem: NSStatusItem?
-    var hotkeyManager: HotkeyManager? // Add a property for our manager
-    var eventManager: EventManager? // Add property for EventManager
-    
-    
+    var hotkeyManager: HotkeyManager?
+    var eventManager: EventManager?
+    var pluginManager: PluginManager? // Add property for PluginManager
+
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Check and request Accessibility permissions
         let accessibilityGranted = self.checkAndRequestAccessibilityPermissions()
-        
         if !accessibilityGranted {
             // Handle lack of permissions if necessary
         }
         
-        // 1. Create the EventManager
-        self.eventManager = EventManager()
-        
-        // 2. Create HotkeyManager and pass the EventManager to it
-        //    Make sure eventManager is not nil here.
+        // 1. Create the PluginManager
+        self.pluginManager = PluginManager()
+
+        // 2. Create the EventManager and pass the PluginManager to it
+        if let pManager = self.pluginManager {
+            self.eventManager = EventManager(pluginManager: pManager)
+        } else {
+            // This should not happen if PluginManager() initializes
+            print("CRITICAL ERROR: PluginManager could not be initialized.")
+            // Fallback: Create EventManager without a PluginManager if absolutely necessary
+            // self.eventManager = EventManager(pluginManager: nil) // Would require EventManager.pluginManager to be optional
+            // Or terminate/disable features
+        }
+
+        // 3. Create HotkeyManager and pass the EventManager to it
         if let evtManager = self.eventManager {
             self.hotkeyManager = HotkeyManager(eventManager: evtManager)
         } else {
-            // This should ideally not happen if EventManager() initializes correctly
             print("CRITICAL ERROR: EventManager could not be initialized.")
-            // Consider how to handle this error, perhaps by disabling functionality
-            // or even terminating if it's essential. For now, we'll just log.
+            // Handle
         }
         
         // --- Status item setup code ---
