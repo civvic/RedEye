@@ -14,6 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var hotkeyManager: HotkeyManager?
     var eventManager: EventManager?
     var pluginManager: PluginManager? // Add property for PluginManager
+    var uiManager: UIManager? // Add property for UIManager
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Check and request Accessibility permissions
@@ -22,28 +23,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             // Handle lack of permissions if necessary
         }
         
-        // 1. Create the PluginManager
+        // 1. Create PluginManager (scans for plugins)
         self.pluginManager = PluginManager()
-
-        // 2. Create the EventManager and pass the PluginManager to it
-        if let pManager = self.pluginManager {
-            self.eventManager = EventManager(pluginManager: pManager)
-        } else {
-            // This should not happen if PluginManager() initializes
-            print("CRITICAL ERROR: PluginManager could not be initialized.")
-            // Fallback: Create EventManager without a PluginManager if absolutely necessary
-            // self.eventManager = EventManager(pluginManager: nil) // Would require EventManager.pluginManager to be optional
-            // Or terminate/disable features
-        }
-
-        // 3. Create HotkeyManager and pass the EventManager to it
-        if let evtManager = self.eventManager {
-            self.hotkeyManager = HotkeyManager(eventManager: evtManager)
-        } else {
-            print("CRITICAL ERROR: EventManager could not be initialized.")
-            // Handle
-        }
         
+        // 2. Create EventManager (needs PluginManager for eventual direct invocation, though UI will trigger now)
+        //    The EventManager's role in directly triggering plugins might diminish if UI always does it.
+        //    For now, it can keep its reference.
+        guard let pManager = self.pluginManager else {
+            fatalError("CRITICAL ERROR: PluginManager could not be initialized.") // Or handle more gracefully
+        }
+        self.eventManager = EventManager()// pluginManager: pManager)
+
+        // 3. Create UIManager (needs PluginManager to tell it what to run)
+        self.uiManager = UIManager(pluginManager: pManager)
+        
+        // 4. Create HotkeyManager (needs EventManager for logging, and UIManager for showing UI)
+        guard let evtManager = self.eventManager, let uiMgr = self.uiManager else {
+            fatalError("CRITICAL ERROR: EventManager or UIManager could not be initialized.")
+        }
+        self.hotkeyManager = HotkeyManager(eventManager: evtManager, uiManager: uiMgr)
+
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {

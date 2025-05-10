@@ -18,64 +18,52 @@ extension KeyboardShortcuts.Name {
 class HotkeyManager {
 
     private let eventManager: EventManager // Add property for EventManager
+    private let uiManager: UIManager // Add property for UIManager
 
-    // Modify init to accept an EventManager
-    init(eventManager: EventManager) {
+    // Modify init to accept EventManager and UIManager
+    init(eventManager: EventManager, uiManager: UIManager) {
         self.eventManager = eventManager
+        self.uiManager = uiManager // Store the UIManager
         setupHotkeyListeners()
     }
 
     private func setupHotkeyListeners() {
         KeyboardShortcuts.onKeyUp(for: .captureSelectedText) { [weak self] in
-            // The [weak self] is important to avoid retain cycles if 'self' is used more extensively inside.
-            // For a simple print, it's less critical but good practice.
             self?.handleCaptureSelectedTextHotkey()
         }
-        
         print("HotkeyManager: Listener for ⌘⇧C (captureSelectedText) is set up.")
     }
 
     private func handleCaptureSelectedTextHotkey() {
         print("HotkeyManager: ⌘⇧C pressed! Attempting to capture selected text...")
 
+        // Get mouse location *before* any blocking accessibility calls
+        let mouseLocation = NSEvent.mouseLocation // This is in screen coordinates
+
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            print("Error: Could not determine the frontmost application.")
-            // Optionally, emit an error event here if desired
-            // let errorEvent = RedEyeEvent(eventType: .textSelection, metadata: ["error": "Could not determine frontmost app"])
-            // eventManager.emit(event: errorEvent)
+            // ... (error handling as before, create error event, emit via eventManager) ...
+            let errorEvent = RedEyeEvent(eventType: .textSelection, metadata: ["error": "Could not determine frontmost app"])
+            eventManager.emit(event: errorEvent)
             return
         }
-
+        // ... (pid, appName, bundleId, appElement, focusedUIElement logic as before) ...
         let pid = frontmostApp.processIdentifier
-        let appElement = AXUIElementCreateApplication(pid)
-        var focusedUIElement: AnyObject?
-        
-        // It's good practice to get app name and bundle ID here as well
         let appName = frontmostApp.localizedName
         let bundleId = frontmostApp.bundleIdentifier
+        let appElement = AXUIElementCreateApplication(pid)
+        var focusedUIElement: AnyObject?
 
         let focusError = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedUIElement)
 
         if focusError != .success {
-            print("Error getting focused UI element: \(focusError.rawValue)")
-            let errorEvent = RedEyeEvent(
-                eventType: .textSelection,
-                sourceApplicationName: appName,
-                sourceBundleIdentifier: bundleId,
-                metadata: ["error": "Error getting focused UI element: \(focusError.rawValue)"]
-            )
+            // ... (create error event with appName, bundleId, metadata, emit via eventManager) ...
+            let errorEvent = RedEyeEvent(eventType: .textSelection, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, metadata: ["error": "Error getting focused UI: \(focusError.rawValue)"])
             eventManager.emit(event: errorEvent)
             return
         }
-
+        // ... (guard focusedElement else, create error event, emit) ...
         guard let focusedElement = focusedUIElement else {
-            print("Error: Focused UI element is nil.")
-            let errorEvent = RedEyeEvent(
-                eventType: .textSelection,
-                sourceApplicationName: appName,
-                sourceBundleIdentifier: bundleId,
-                metadata: ["error": "Focused UI element was nil after successful AX query."]
-            )
+            let errorEvent = RedEyeEvent(eventType: .textSelection, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, metadata: ["error": "Focused UI element nil."])
             eventManager.emit(event: errorEvent)
             return
         }
@@ -83,33 +71,30 @@ class HotkeyManager {
         var selectedTextValue: AnyObject?
         let selectedTextError = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedTextValue)
 
-        if selectedTextError == .success {
-            let capturedText = selectedTextValue as? String // Can be nil or empty
-            
-            let event = RedEyeEvent(
-                eventType: .textSelection,
-                sourceApplicationName: appName,
-                sourceBundleIdentifier: bundleId,
-                contextText: capturedText?.isEmpty == false ? capturedText : nil // Store nil if empty for cleaner JSON
-            )
-            eventManager.emit(event: event)
-            
-            // For console feedback during dev, we can still print the direct outcome
-            if let text = capturedText, !text.isEmpty {
-                 print("Selected text captured: \"\(text)\"")
-            } else {
-                 print("No text selected or focused element provided no text.")
-            }
+        let capturedText = (selectedTextError == .success) ? (selectedTextValue as? String) : nil
+        
+        // Always create and log the RedEyeEvent
+        let event = RedEyeEvent(
+            eventType: .textSelection,
+            sourceApplicationName: appName,
+            sourceBundleIdentifier: bundleId,
+            contextText: capturedText?.isEmpty == false ? capturedText : nil,
+            metadata: selectedTextError != .success ? ["error": "AXSelectedTextError: \(selectedTextError.rawValue)"] : nil
+        )
+        eventManager.emit(event: event) // Log the event (JSON output)
 
+        // Now, if text was successfully captured (or even if not, UI might still show),
+        // show the plugin actions panel.
+        // We'll pass the capturedText (which can be nil). UIManager can decide what to do.
+        if let textToShowInPanel = capturedText, !textToShowInPanel.isEmpty {
+            print("HotkeyManager: Captured text \"\(textToShowInPanel)\". Requesting UI panel.")
+            uiManager.showPluginActionsPanel(near: mouseLocation, withContextText: textToShowInPanel)
         } else {
-            print("Could not get selected text. Error: \(selectedTextError.rawValue)")
-            let errorEvent = RedEyeEvent(
-                eventType: .textSelection,
-                sourceApplicationName: appName,
-                sourceBundleIdentifier: bundleId,
-                metadata: ["error": "Could not get selected text from focused element: \(selectedTextError.rawValue)"]
-            )
-            eventManager.emit(event: errorEvent)
+            // Decide if you want to show the panel even if no text is selected.
+            // For PopClip, it usually only appears if there's a selection.
+            print("HotkeyManager: No text selected or error capturing. Not showing UI panel.")
+            // Or, to always show it and let UIManager/PluginActionsViewController decide:
+            // uiManager.showPluginActionsPanel(near: mouseLocation, withContextText: nil)
         }
     }
     
