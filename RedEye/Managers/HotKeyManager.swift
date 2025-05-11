@@ -15,10 +15,11 @@ extension KeyboardShortcuts.Name {
     static let captureSelectedText = Self("captureSelectedText", default: .init(.c, modifiers: [.command, .shift]))
 }
 
-class HotkeyManager {
+class HotkeyManager: InputMonitorManagerDelegate {
 
-    private let eventManager: EventManager // Add property for EventManager
-    private let uiManager: UIManager // Add property for UIManager
+    private let eventManager: EventManager
+    private let uiManager: UIManager
+    private var lastMouseSelectedText: String? // <--- ADD THIS to store last mouse-captured text
 
     // Modify init to accept EventManager and UIManager
     init(eventManager: EventManager, uiManager: UIManager) {
@@ -29,24 +30,25 @@ class HotkeyManager {
 
     private func setupHotkeyListeners() {
         KeyboardShortcuts.onKeyUp(for: .captureSelectedText) { [weak self] in
-            self?.handleCaptureSelectedTextHotkey()
+            self?.handleTextCaptureTrigger(isHotkey: true, mousePositionForUI: NSEvent.mouseLocation)
         }
         RedEyeLogger.info("Listener for ⌘⇧C (captureSelectedText) is set up.", category: "HotKeyManager")
     }
 
-    private func handleCaptureSelectedTextHotkey() {
-        RedEyeLogger.info("⌘⇧C pressed! Attempting to capture selected text...", category: "HotKeyManager")
+    // Renamed and generalized original hotkey handler
+    private func handleTextCaptureTrigger(isHotkey: Bool, mousePositionForUI: NSPoint) {
+        let triggerType = isHotkey ? "hotkey (⌘⇧C)" : "mouse_selection"
+//        RedEyeLogger.info("Attempting to capture selected text (Trigger: \(triggerType))...", category: "HotKeyManager")
 
-        // Get mouse location *before* any blocking accessibility calls
-        let mouseLocation = NSEvent.mouseLocation // This is in screen coordinates
-
+        // --- Accessibility & Text Fetching Logic (largely the same) ---
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            // ... (error handling as before, create error event, emit via eventManager) ...
-            let errorEvent = RedEyeEvent(eventType: .textSelection, metadata: ["error": "Could not determine frontmost app"])
+            // ... (error handling for no frontmost app, include triggerType in metadata) ...
+            RedEyeLogger.error("Could not determine frontmost app. (Trigger: \(triggerType))", category: "HotKeyManager")
+            let errorEvent = RedEyeEvent(eventType: .textSelection, metadata: ["error": "Could not determine frontmost app", "trigger": triggerType])
             eventManager.emit(event: errorEvent)
             return
         }
-        // ... (pid, appName, bundleId, appElement, focusedUIElement logic as before) ...
+
         let pid = frontmostApp.processIdentifier
         let appName = frontmostApp.localizedName
         let bundleId = frontmostApp.bundleIdentifier
@@ -56,50 +58,90 @@ class HotkeyManager {
         let focusError = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedUIElement)
 
         if focusError != .success {
-            // ... (create error event with appName, bundleId, metadata, emit via eventManager) ...
-            let errorEvent = RedEyeEvent(eventType: .textSelection, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, metadata: ["error": "Error getting focused UI: \(focusError.rawValue)"])
+            let errorEvent = RedEyeEvent(
+                eventType: .textSelection,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                metadata: ["error": "Error getting focused UI: \(focusError.rawValue)", "trigger": triggerType]
+            )
             eventManager.emit(event: errorEvent)
             return
         }
-        // ... (guard focusedElement else, create error event, emit) ...
+        
         guard let focusedElement = focusedUIElement else {
-            let errorEvent = RedEyeEvent(eventType: .textSelection, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, metadata: ["error": "Focused UI element nil."])
+            let errorEvent = RedEyeEvent(
+                eventType: .textSelection,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                metadata: ["error": "Focused UI element nil.", "trigger": triggerType]
+            )
             eventManager.emit(event: errorEvent)
             return
         }
 
         var selectedTextValue: AnyObject?
         let selectedTextError = AXUIElementCopyAttributeValue(focusedElement as! AXUIElement, kAXSelectedTextAttribute as CFString, &selectedTextValue)
-
         let capturedText = (selectedTextError == .success) ? (selectedTextValue as? String) : nil
+
+        // --- Heuristic for mouse selection: Only proceed if text is non-empty AND different from last ---
+        if !isHotkey { // Apply this heuristic only for mouse-triggered selections
+            if capturedText == nil || capturedText!.isEmpty {
+                RedEyeLogger.info("Mouse selection resulted in empty text. Not processing further. Last mouse selection: \"\(self.lastMouseSelectedText ?? "nil")\"", category: "HotKeyManager")
+                // Optionally, clear lastMouseSelectedText if current selection is empty,
+                // so a subsequent empty selection doesn't get blocked by a previous non-empty one.
+                // However, if it's truly empty, it won't match a previous non-empty one anyway.
+                // self.lastMouseSelectedText = nil // Or set to capturedText which is nil/empty
+                return // Stop processing for this mouse event
+            }
+            if capturedText == self.lastMouseSelectedText {
+                RedEyeLogger.info("Mouse selected text \"\(capturedText!)\" is the same as the last. Not processing further.", category: "HotKeyManager")
+                return // Stop processing for this mouse event
+            }
+            // If different and non-empty, update lastMouseSelectedText for the next mouse event
+            self.lastMouseSelectedText = capturedText
+            RedEyeLogger.info("New mouse selection: \"\(capturedText!)\". Previous: \"\(self.lastMouseSelectedText ?? "nil")\" (before update). Processing event.", category: "HotKeyManager")
+        } else {
+            // For hotkey, always clear any "last mouse selected text" so it doesn't interfere
+            // and so that a subsequent mouse selection isn't incorrectly blocked.
+            self.lastMouseSelectedText = nil
+            RedEyeLogger.info("Hotkey trigger. Processing event for captured text: \"\(capturedText ?? "nil")\"", category: "HotKeyManager")
+        }
+        // --- End Heuristic ---
         
-        // Always create and log the RedEyeEvent
+        // Log the attempt *after* basic heuristics, and only if we are proceeding
+        RedEyeLogger.info("Processing text capture (Trigger: \(triggerType), Text: \"\(capturedText ?? "nil")\")...", category: "HotKeyManager")
+
+        var metadata: [String: String] = ["trigger": triggerType]
+        if selectedTextError != .success {
+            metadata["error"] = "AXSelectedTextError: \(selectedTextError.rawValue)"
+        }
+        
+        // For mouse selections, we've already confirmed capturedText is non-nil and non-empty if we reach here.
+        // For hotkeys, capturedText can still be nil/empty.
         let event = RedEyeEvent(
             eventType: .textSelection,
             sourceApplicationName: appName,
             sourceBundleIdentifier: bundleId,
-            contextText: capturedText?.isEmpty == false ? capturedText : nil,
-            metadata: selectedTextError != .success ? ["error": "AXSelectedTextError: \(selectedTextError.rawValue)"] : nil
+            contextText: capturedText, // It's already nil if empty or error, or non-empty here for mouse
+            metadata: metadata
         )
-        eventManager.emit(event: event) // Log the event (JSON output)
+        eventManager.emit(event: event)
 
-        // Now, if text was successfully captured (or even if not, UI might still show),
-        // show the plugin actions panel.
-        // We'll pass the capturedText (which can be nil). UIManager can decide what to do.
+        // Show UI panel only if text is actually captured and non-empty
         if let textToShowInPanel = capturedText, !textToShowInPanel.isEmpty {
-            RedEyeLogger.info("Captured text \"\(textToShowInPanel)\". Requesting UI panel.", category: "HotKeyManager")
-            uiManager.showPluginActionsPanel(near: mouseLocation, withContextText: textToShowInPanel)
+            RedEyeLogger.info("Captured text \"\(textToShowInPanel)\". Requesting UI panel at \(mousePositionForUI).", category: "HotKeyManager")
+            uiManager.showPluginActionsPanel(near: mousePositionForUI, withContextText: textToShowInPanel)
         } else {
-            // Decide if you want to show the panel even if no text is selected.
-            // For PopClip, it usually only appears if there's a selection.
-            RedEyeLogger.error("No text selected or error capturing. Not showing UI panel.", category: "HotKeyManager")
-            // Or, to always show it and let UIManager/PluginActionsViewController decide:
-            // uiManager.showPluginActionsPanel(near: mouseLocation, withContextText: nil)
+            // This branch will now typically only be hit for hotkey trigger with no selection,
+            // or if there was an AX error. Mouse selections with empty text are returned early.
+            RedEyeLogger.info("No text selected or error capturing. Not showing UI panel. (Trigger: \(triggerType))", category: "HotKeyManager")
         }
     }
-    
-    // If you need to explicitly unregister (though KeyboardShortcuts often handles this well on deinit or app quit)
-    // or manage them more dynamically, you might add methods here.
-    // For this library, often just setting up the listener is enough, and it cleans up.
-    // We can revisit if specific cleanup is needed beyond what the library provides.
+
+    // MARK: - InputMonitorManagerDelegate Implementation
+    func mouseUpAfterPotentialSelection(at screenPoint: NSPoint) {
+        RedEyeLogger.info("HotkeyManager received mouseUpAfterPotentialSelection at \(screenPoint)", category: "HotKeyManager")
+        // Call the common text capture logic. The mousePositionForUI is the 'screenPoint' from the mouse up.
+        handleTextCaptureTrigger(isHotkey: false, mousePositionForUI: screenPoint)
+    }
 }
