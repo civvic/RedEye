@@ -13,8 +13,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var hotkeyManager: HotkeyManager?
     var eventManager: EventManager?
-    var pluginManager: PluginManager? // Add property for PluginManager
-    var uiManager: UIManager? // Add property for UIManager
+    var pluginManager: PluginManager?
+    var uiManager: UIManager?
+    var webSocketServerManager: WebSocketServerManager? // <--- ADD THIS LINE
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Check and request Accessibility permissions
@@ -43,6 +44,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.hotkeyManager = HotkeyManager(eventManager: evtManager, uiManager: uiMgr)
 
+        // 5. Initialize and Start WebSocketServerManager  // <--- NEW SECTION
+        self.webSocketServerManager = WebSocketServerManager()
+        self.webSocketServerManager?.startServer() // Start the server
+
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -68,6 +73,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationWillTerminate(_ aNotification: Notification) {
         // Cleanup if needed
+        RedEyeLogger.info("RedEye application will terminate. Stopping services...", category: "AppDelegate")
+        webSocketServerManager?.stopServer() // <--- ADD THIS LINE
     }
     
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

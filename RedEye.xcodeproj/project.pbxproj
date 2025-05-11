@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1C41BA982DCCE1EA003B1627 /* KeyboardShortcuts in Frameworks */ = {isa = PBXBuildFile; productRef = 1C41BA972DCCE1EA003B1627 /* KeyboardShortcuts */; };
+		1C4696722DCFCC3800F9DC40 /* WebSocketKit in Frameworks */ = {isa = PBXBuildFile; productRef = 1C4696712DCFCC3800F9DC40 /* WebSocketKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1C41BA982DCCE1EA003B1627 /* KeyboardShortcuts in Frameworks */,
+				1C4696722DCFCC3800F9DC40 /* WebSocketKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = RedEye;
 			packageProductDependencies = (
 				1C41BA972DCCE1EA003B1627 /* KeyboardShortcuts */,
+				1C4696712DCFCC3800F9DC40 /* WebSocketKit */,
 			);
 			productName = RedEye;
 			productReference = 1C5875F12DCCBB4000061F5F /* RedEye.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				1C41BA962DCCE1EA003B1627 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */,
+				1C4696702DCFCC3800F9DC40 /* XCRemoteSwiftPackageReference "websocket-kit" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 1C5875F22DCCBB4000061F5F /* Products */;
@@ -338,6 +342,14 @@
 				minimumVersion = 2.3.0;
 			};
 		};
+		1C4696702DCFCC3800F9DC40 /* XCRemoteSwiftPackageReference "websocket-kit" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/vapor/websocket-kit.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 2.16.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -345,6 +357,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 1C41BA962DCCE1EA003B1627 /* XCRemoteSwiftPackageReference "KeyboardShortcuts" */;
 			productName = KeyboardShortcuts;
+		};
+		1C4696712DCFCC3800F9DC40 /* WebSocketKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 1C4696702DCFCC3800F9DC40 /* XCRemoteSwiftPackageReference "websocket-kit" */;
+			productName = WebSocketKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
