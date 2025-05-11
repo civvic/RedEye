@@ -14,6 +14,7 @@ import Foundation
 // Conforms to Codable to be part of RedEyeEvent's Codable conformance
 enum RedEyeEventType: String, Codable {
     case textSelection
+    case applicationActivated
     // Add other event types here later, e.g., fileSelection, screenshotTaken
 }
 

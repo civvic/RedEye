@@ -16,7 +16,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var pluginManager: PluginManager?
     var uiManager: UIManager?
     var webSocketServerManager: WebSocketServerManager?
-    var inputMonitorManager: InputMonitorManager? // <--- ADD THIS LINE
+    var inputMonitorManager: InputMonitorManager?
+    var appActivationMonitor: AppActivationMonitor?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Check and request Accessibility permissions
@@ -53,8 +54,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // 6. Initialize and Start InputMonitorManager
         self.inputMonitorManager = InputMonitorManager()
-        self.inputMonitorManager?.delegate = self.hotkeyManager // <--- SET THE DELEGATE
+        self.inputMonitorManager?.delegate = self.hotkeyManager
         self.inputMonitorManager?.startMonitoring()
+
+        // 7. Initialize and Start AppActivationMonitor
+        if let evtMgr = self.eventManager { // Ensure eventManager is available
+            self.appActivationMonitor = AppActivationMonitor(eventManager: evtMgr)
+            self.appActivationMonitor?.startMonitoring()
+        } else {
+            RedEyeLogger.fault("EventManager not available for AppActivationMonitor. App activation events will not be monitored.", category: "AppDelegate")
+        }
 
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
@@ -80,10 +89,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
-        // Cleanup if needed
         RedEyeLogger.info("RedEye application will terminate. Stopping services...", category: "AppDelegate")
         webSocketServerManager?.stopServer()
-        inputMonitorManager?.stopMonitoring() // <--- ADD THIS LINE
+        inputMonitorManager?.stopMonitoring()
+        appActivationMonitor?.stopMonitoring()
     }
     
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
