@@ -8,16 +8,14 @@
 import Foundation
 
 class EventManager {
-
     private let jsonEncoder: JSONEncoder
-    // private let pluginManager: PluginManager // We can remove this if UIManager handles all invocations
+    private weak var webSocketServerManager: WebSocketServerManager? // Make it weak to avoid retain cycles if WSSM might ever hold EventManager
 
-    // init(pluginManager: PluginManager) { // Adjust init if pluginManager is removed
-    init() { // Simplified init
-        // self.pluginManager = pluginManager
+    init(webSocketServerManager: WebSocketServerManager?) { // Allow optional for flexibility, though we'll pass it
         self.jsonEncoder = JSONEncoder()
         self.jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         self.jsonEncoder.dateEncodingStrategy = .iso8601
+        self.webSocketServerManager = webSocketServerManager
     }
 
     func emit(event: RedEyeEvent) {
@@ -25,22 +23,22 @@ class EventManager {
         do {
             let jsonData = try jsonEncoder.encode(event)
             if let jsonString = String(data: jsonData, encoding: .utf8) {
-                RedEyeLogger.info("--- RedEyeEvent Emitted ---", category: "EventManager")
-                RedEyeLogger.info(jsonString, category: "EventManager")
-                RedEyeLogger.info("---------------------------", category: "EventManager")
+                RedEyeLogger.info("--- RedEyeEvent Emitted (Logged) ---", category: "EventManager")
+                RedEyeLogger.info(jsonString, category: "EventManager") // This is the local log
+                RedEyeLogger.info("------------------------------------", category: "EventManager")
             } else {
-                RedEyeLogger.error("Could not convert JSON data to string.", category: "EventManager")
+                RedEyeLogger.error("Could not convert JSON data to string for local logging.", category: "EventManager")
             }
         } catch {
-            RedEyeLogger.error("Failed to encode RedEyeEvent to JSON", category: "EventManager", error:error)
+            RedEyeLogger.error("Failed to encode RedEyeEvent to JSON for local logging", category: "EventManager", error:error)
         }
 
-        // 2. For now, EventManager only logs. Plugin invocation is handled by UIManager via UI.
-        // if event.eventType == .textSelection {
-        //     if let textToProcess = event.contextText, !textToProcess.isEmpty {
-        //         // print("EventManager: (Old logic) Passing text to PluginManager: \"\(textToProcess)\"")
-        //         // pluginManager.invokePlugins(withText: textToProcess)
-        //     }
-        // }
+        // 2. Broadcast the event via WebSocketServerManager
+        if let manager = webSocketServerManager {
+            RedEyeLogger.debug("EventManager: Asking WebSocketServerManager to broadcast event.", category: "EventManager")
+            manager.broadcastEvent(event)
+        } else {
+            RedEyeLogger.debug("EventManager: WebSocketServerManager not available. Event not broadcasted.", category: "EventManager")
+        }
     }
 }

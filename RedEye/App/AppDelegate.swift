@@ -27,13 +27,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // 1. Create PluginManager (scans for plugins)
         self.pluginManager = PluginManager()
         
+        // PREP: Initialize WebSocketServerManager first so it can be passed around
+        self.webSocketServerManager = WebSocketServerManager() // Initialize WSSM
+
         // 2. Create EventManager (needs PluginManager for eventual direct invocation, though UI will trigger now)
         //    The EventManager's role in directly triggering plugins might diminish if UI always does it.
         //    For now, it can keep its reference.
         guard let pManager = self.pluginManager else {
             fatalError("CRITICAL ERROR: PluginManager could not be initialized.") // Or handle more gracefully
         }
-        self.eventManager = EventManager()// pluginManager: pManager)
+        self.eventManager = EventManager(webSocketServerManager: self.webSocketServerManager)
 
         // 3. Create UIManager (needs PluginManager to tell it what to run)
         self.uiManager = UIManager(pluginManager: pManager)
@@ -44,8 +47,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         self.hotkeyManager = HotkeyManager(eventManager: evtManager, uiManager: uiMgr)
 
-        // 5. Initialize and Start WebSocketServerManager  // <--- NEW SECTION
-        self.webSocketServerManager = WebSocketServerManager()
+        // 5. Initialize and Start WebSocketServerManager
         self.webSocketServerManager?.startServer() // Start the server
 
         // --- Status item setup code ---

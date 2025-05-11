@@ -12,6 +12,14 @@ class WebSocketServerManager {
     private var group: EventLoopGroup?
     private var connectedClients: [UUID: WebSocket] = [:]
 
+    // Add this encoder at the class level for reuse
+    private let jsonEncoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys] // Or just .sortedKeys for compactness over network
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }() // Add this
+
     init() {
         self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
     }
@@ -145,4 +153,30 @@ class WebSocketServerManager {
         self.group = nil
         self.serverChannel = nil
     }
+    
+    public func broadcastEvent(_ event: RedEyeEvent) {
+        do {
+            let jsonData = try self.jsonEncoder.encode(event) // Use Self.jsonEncoder
+            guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+                RedEyeLogger.error("Failed to convert RedEyeEvent to JSON string for broadcasting.", category: "WebSocketServerManager")
+                return
+            }
+
+            if connectedClients.isEmpty {
+                RedEyeLogger.debug("No WebSocket clients connected. Event not broadcasted.", category: "WebSocketServerManager")
+                return
+            }
+
+            RedEyeLogger.info("Broadcasting event (\(event.eventType)) to \(connectedClients.count) client(s).", category: "WebSocketServerManager")
+            // RedEyeLogger.debug("Event JSON for broadcast: \(jsonString)", category: "WebSocketServerManager") // Can be verbose
+
+            for (clientID, ws) in connectedClients {
+                RedEyeLogger.debug("Sending event to client \(clientID).", category: "WebSocketServerManager")
+                ws.send(jsonString) // WebSocketKit's send method takes a String directly
+            }
+        } catch {
+            RedEyeLogger.error("Failed to encode RedEyeEvent for broadcasting: \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
+        }
+    }
+
 }
