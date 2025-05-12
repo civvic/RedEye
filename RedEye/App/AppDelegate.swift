@@ -18,6 +18,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var webSocketServerManager: WebSocketServerManager?
     var inputMonitorManager: InputMonitorManager?
     var appActivationMonitor: AppActivationMonitor?
+    var fsEventMonitorManager: FSEventMonitorManager?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Check and request Accessibility permissions
@@ -65,6 +66,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             RedEyeLogger.fault("EventManager not available for AppActivationMonitor. App activation events will not be monitored.", category: "AppDelegate")
         }
 
+        // 8. Initialize and Start FSEventMonitorManager
+        if let evtMgr = self.eventManager { // Ensure eventManager is available and can act as delegate
+            self.fsEventMonitorManager = FSEventMonitorManager(delegate: evtMgr) // Pass EventManager as delegate
+            self.fsEventMonitorManager?.startMonitoring() // Start monitoring default paths
+        } else {
+            RedEyeLogger.fault("EventManager not available for FSEventMonitorManager. File system events will not be monitored.", category: "AppDelegate")
+        }
+
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -93,6 +102,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         webSocketServerManager?.stopServer()
         inputMonitorManager?.stopMonitoring()
         appActivationMonitor?.stopMonitoring()
+        fsEventMonitorManager?.stopMonitoring()
     }
     
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {

@@ -15,6 +15,7 @@ import Foundation
 enum RedEyeEventType: String, Codable {
     case textSelection
     case applicationActivated
+    case fileSystemEvent
     // Add other event types here later, e.g., fileSelection, screenshotTaken
 }
 

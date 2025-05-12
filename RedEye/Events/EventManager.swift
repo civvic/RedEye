@@ -7,7 +7,7 @@
 
 import Foundation
 
-class EventManager {
+class EventManager: FSEventMonitorDelegate { // <-- Adopt the protocol
     private let jsonEncoder: JSONEncoder
     private weak var webSocketServerManager: WebSocketServerManager? // Make it weak to avoid retain cycles if WSSM might ever hold EventManager
 
@@ -41,4 +41,13 @@ class EventManager {
             RedEyeLogger.debug("EventManager: WebSocketServerManager not available. Event not broadcasted.", category: "EventManager")
         }
     }
+    
+    // MARK: - FSEventMonitorDelegate
+    
+    func fsEventMonitor(_ monitor: FSEventMonitorManager, didEmit event: RedEyeEvent) {
+        RedEyeLogger.info("EventManager received event from FSEventMonitor.", category: "EventManager")
+        // Simply pass the received event to the main emit flow
+        emit(event: event)
+    }
+
 }
