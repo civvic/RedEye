@@ -6,15 +6,17 @@ import ApplicationServices
 class AppDelegate: NSObject, NSApplicationDelegate {
     
     var statusItem: NSStatusItem?
-    var hotkeyManager: HotkeyManager?
+    var hotkeyManager: HotkeyManager? // Doesn't emit events directly, controls UI/triggers text fetch
     var eventManager: EventManager?
-    var pluginManager: PluginManager?
-    var uiManager: UIManager?
-    var webSocketServerManager: WebSocketServerManager?
-    var inputMonitorManager: InputMonitorManager? // For mouse-based selection
-    var appActivationMonitor: AppActivationMonitor?
-    var fsEventMonitorManager: FSEventMonitorManager?
-    var keyboardMonitorManager: KeyboardMonitorManager? // <<< NEW Property
+    var pluginManager: PluginManager? // Doesn't emit system events
+    var uiManager: UIManager?         // Doesn't emit system events
+    var webSocketServerManager: WebSocketServerManager? // Doesn't emit system events itself
+    
+    // Event emitting managers:
+    var inputMonitorManager: InputMonitorManager? // Mouse Selection -> textSelection event
+    var appActivationMonitor: AppActivationMonitor? // App Activation -> applicationActivated event
+    var fsEventMonitorManager: FSEventMonitorManager? // FS Change -> fileSystemEvent event
+    var keyboardMonitorManager: KeyboardMonitorManager? // Keyboard -> keyboardEvent event
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
         // Check and request Accessibility permissions (already needed for text selection)
@@ -23,56 +25,35 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // --- Manager Initialization Order ---
         // Generally: Utils -> Core Logic -> Monitors/Servers -> UI-related
         
-        // 1. Plugin Manager (Standalone)
+        // --- Manager Initialization ---
         self.pluginManager = PluginManager()
-        
-        // 2. WebSocket Server (Needed by EventManager)
         self.webSocketServerManager = WebSocketServerManager()
-
-        // 3. Event Manager (Needs WebSocketServer, Acts as Delegate for Monitors)
-        guard let pManager = self.pluginManager, let wsManager = self.webSocketServerManager else {
-            fatalError("CRITICAL ERROR: PluginManager or WebSocketServerManager could not be initialized.")
-        }
-        // EventManager now also acts as KeyboardEventMonitorDelegate
+        guard let pManager = self.pluginManager, let wsManager = self.webSocketServerManager else { fatalError("...") }
         self.eventManager = EventManager(webSocketServerManager: wsManager)
-        guard let evtManager = self.eventManager else {
-             fatalError("CRITICAL ERROR: EventManager could not be initialized.")
-        }
-
-        // 4. UI Manager (Needs PluginManager)
+        guard let evtManager = self.eventManager else { fatalError("...") }
         self.uiManager = UIManager(pluginManager: pManager)
-        guard let uiMgr = self.uiManager else {
-            fatalError("CRITICAL ERROR: UIManager could not be initialized.")
-        }
-
-        // 5. Hotkey Manager (Needs EventManager, UIManager, acts as InputMonitor delegate)
+        guard let uiMgr = self.uiManager else { fatalError("...") }
         self.hotkeyManager = HotkeyManager(eventManager: evtManager, uiManager: uiMgr)
-        
-        // 6. Input Monitor (Mouse Selection - Needs HotkeyManager as delegate)
         self.inputMonitorManager = InputMonitorManager()
-        self.inputMonitorManager?.delegate = self.hotkeyManager // HotkeyManager implements the delegate protocol
-
-        // 7. App Activation Monitor (Needs EventManager)
+        self.inputMonitorManager?.delegate = self.hotkeyManager
         self.appActivationMonitor = AppActivationMonitor(eventManager: evtManager)
-        
-        // 8. FS Event Monitor (Needs EventManager as delegate)
-        self.fsEventMonitorManager = FSEventMonitorManager(delegate: evtManager) // Pass EventManager as delegate
-        // Optional: Add developer toggle for FS Monitor here if needed
-        // self.fsEventMonitorManager?.isEnabled = false // Example: Disable FS monitor
+        self.fsEventMonitorManager = FSEventMonitorManager(delegate: evtManager)
+        self.keyboardMonitorManager = KeyboardMonitorManager(delegate: evtManager)
 
-        // 9. Keyboard Monitor (Needs EventManager as delegate) <<< NEW
-        self.keyboardMonitorManager = KeyboardMonitorManager(delegate: evtManager) // Pass EventManager as delegate
-        // Optional: Add developer toggle for Keyboard Monitor
-        // self.keyboardMonitorManager?.isEnabled = false // Example: Disable keyboard monitor
-        
-        // --- Start Services ---
-        
+        // --- Set Default Monitor States (Disabled by default for Dev) --- <<< NEW SECTION
+        RedEyeLogger.info("Setting default monitor states (disabled). Modify in AppDelegate for testing.", category: "AppDelegate")
+        self.inputMonitorManager?.isEnabled = true // Disable Mouse Selection Monitor
+        self.appActivationMonitor?.isEnabled = false // Enable App Activation Monitor
+        self.fsEventMonitorManager?.isEnabled = false // Disable FS Event Monitor
+        self.keyboardMonitorManager?.isEnabled = false // Disable Keyboard Monitor
+
+        // --- Start Services (will respect isEnabled flags) ---
         self.webSocketServerManager?.startServer()
-        self.inputMonitorManager?.startMonitoring() // Start mouse monitor
+        self.inputMonitorManager?.startMonitoring()
         self.appActivationMonitor?.startMonitoring()
-        self.fsEventMonitorManager?.startMonitoring() // Start FS monitor
-        self.keyboardMonitorManager?.startMonitoring() // Start keyboard monitor <<< NEW
-        
+        self.fsEventMonitorManager?.startMonitoring()
+        self.keyboardMonitorManager?.startMonitoring()
+
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -99,13 +80,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     func applicationWillTerminate(_ aNotification: Notification) {
         RedEyeLogger.info("RedEye application will terminate. Stopping services...", category: "AppDelegate")
-        // Stop in reverse order of start, generally
-        keyboardMonitorManager?.stopMonitoring() // <<< NEW
+        keyboardMonitorManager?.stopMonitoring()
         fsEventMonitorManager?.stopMonitoring()
         appActivationMonitor?.stopMonitoring()
         inputMonitorManager?.stopMonitoring()
         webSocketServerManager?.stopServer()
-        // Other managers (HotkeyManager, EventManager, PluginManager, UIManager) don't have explicit stop methods currently.
     }
     
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
@@ -134,5 +113,4 @@ class AppDelegate: NSObject, NSApplicationDelegate {
              return accessEnabled
         }
     }
-    
 }

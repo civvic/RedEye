@@ -28,12 +28,21 @@ class InputMonitorManager {
     private let dragThresholdDistanceSquared: CGFloat = 25.0 // (5 pixels)^2, distance mouse must move to be considered a drag
     private let clickMaxDuration: TimeInterval = 0.3 // Max duration for a click (seconds)
 
+    // MARK: - Developer Toggle <<< NEW
+    var isEnabled: Bool = true // Default to true, will be set by AppDelegate
+
     init() {
         // Initialization, but monitors will be started explicitly
         RedEyeLogger.info("InputMonitorManager initialized.", category: "InputMonitorManager")
     }
 
     func startMonitoring() {
+        // Respect the isEnabled flag <<< MODIFIED
+        guard isEnabled else {
+            RedEyeLogger.info("InputMonitorManager monitoring is disabled by toggle.", category: "InputMonitorManager")
+            return
+        }
+
         guard mouseDownMonitor == nil, mouseUpMonitor == nil else {
             RedEyeLogger.info("Monitors are already active.", category: "InputMonitorManager")
             return
