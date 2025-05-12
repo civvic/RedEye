@@ -1,11 +1,4 @@
-//
-//  RedEyeEvent.swift
-//  RedEye
-//
-//  Created by Vicente Sosa on 5/9/25.
-//
-
-// RedEyeEvent.swift
+// RedEye/Events/RedEyeEvent.swift
 
 import Foundation
 
@@ -16,6 +9,7 @@ enum RedEyeEventType: String, Codable {
     case textSelection
     case applicationActivated
     case fileSystemEvent
+    case keyboardEvent // <<< NEW
     // Add other event types here later, e.g., fileSelection, screenshotTaken
 }
 
@@ -42,4 +36,17 @@ struct RedEyeEvent: Codable {
         self.contextText = contextText
         self.metadata = metadata
     }
+    
+    // --- Potential Metadata Keys for keyboardEvent ---
+    // "keyboard_event_type": "keyDown", "keyUp", "flagsChanged"
+    // "keyboard_key_code": String(keyCode) // e.g., "49" for spacebar
+    // "keyboard_character": Character representation if available, e.g., "a", "A", " "
+    // "keyboard_modifiers_flags": String(modifierFlags.rawValue) // Raw value
+    // "keyboard_modifier_cmd_active": "true"/"false"
+    // "keyboard_modifier_shift_active": "true"/"false"
+    // "keyboard_modifier_option_active": "true"/"false"
+    // "keyboard_modifier_control_active": "true"/"false"
+    // "keyboard_modifier_fn_active": "true"/"false"
+    // "keyboard_modifier_capslock_active": "true"/"false"
+    // --------------------------------------------------
 }

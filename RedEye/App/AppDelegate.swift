@@ -1,9 +1,4 @@
-//
-//  AppDelegate.swift
-//  RedEye
-//
-//  Created by Vicente Sosa on 5/8/25.
-//
+// RedEye/App/AppDelegate.swift
 
 import Cocoa
 import ApplicationServices
@@ -16,64 +11,68 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var pluginManager: PluginManager?
     var uiManager: UIManager?
     var webSocketServerManager: WebSocketServerManager?
-    var inputMonitorManager: InputMonitorManager?
+    var inputMonitorManager: InputMonitorManager? // For mouse-based selection
     var appActivationMonitor: AppActivationMonitor?
     var fsEventMonitorManager: FSEventMonitorManager?
+    var keyboardMonitorManager: KeyboardMonitorManager? // <<< NEW Property
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        // Check and request Accessibility permissions
-        let accessibilityGranted = self.checkAndRequestAccessibilityPermissions()
-        if !accessibilityGranted {
-            // Handle lack of permissions if necessary
-        }
+        // Check and request Accessibility permissions (already needed for text selection)
+        _ = self.checkAndRequestAccessibilityPermissions() // Result ignored for now
         
-        // 1. Create PluginManager (scans for plugins)
+        // --- Manager Initialization Order ---
+        // Generally: Utils -> Core Logic -> Monitors/Servers -> UI-related
+        
+        // 1. Plugin Manager (Standalone)
         self.pluginManager = PluginManager()
         
-        // PREP: Initialize WebSocketServerManager first so it can be passed around
-        self.webSocketServerManager = WebSocketServerManager() // Initialize WSSM
+        // 2. WebSocket Server (Needed by EventManager)
+        self.webSocketServerManager = WebSocketServerManager()
 
-        // 2. Create EventManager (needs PluginManager for eventual direct invocation, though UI will trigger now)
-        //    The EventManager's role in directly triggering plugins might diminish if UI always does it.
-        //    For now, it can keep its reference.
-        guard let pManager = self.pluginManager else {
-            fatalError("CRITICAL ERROR: PluginManager could not be initialized.") // Or handle more gracefully
+        // 3. Event Manager (Needs WebSocketServer, Acts as Delegate for Monitors)
+        guard let pManager = self.pluginManager, let wsManager = self.webSocketServerManager else {
+            fatalError("CRITICAL ERROR: PluginManager or WebSocketServerManager could not be initialized.")
         }
-        self.eventManager = EventManager(webSocketServerManager: self.webSocketServerManager)
+        // EventManager now also acts as KeyboardEventMonitorDelegate
+        self.eventManager = EventManager(webSocketServerManager: wsManager)
+        guard let evtManager = self.eventManager else {
+             fatalError("CRITICAL ERROR: EventManager could not be initialized.")
+        }
 
-        // 3. Create UIManager (needs PluginManager to tell it what to run)
+        // 4. UI Manager (Needs PluginManager)
         self.uiManager = UIManager(pluginManager: pManager)
-        
-        // 4. Create HotkeyManager (needs EventManager for logging, and UIManager for showing UI)
-        guard let evtManager = self.eventManager, let uiMgr = self.uiManager else {
-            fatalError("CRITICAL ERROR: EventManager or UIManager could not be initialized.")
+        guard let uiMgr = self.uiManager else {
+            fatalError("CRITICAL ERROR: UIManager could not be initialized.")
         }
+
+        // 5. Hotkey Manager (Needs EventManager, UIManager, acts as InputMonitor delegate)
         self.hotkeyManager = HotkeyManager(eventManager: evtManager, uiManager: uiMgr)
-
-        // 5. Initialize and Start WebSocketServerManager
-        self.webSocketServerManager?.startServer() // Start the server
-
-        // 6. Initialize and Start InputMonitorManager
+        
+        // 6. Input Monitor (Mouse Selection - Needs HotkeyManager as delegate)
         self.inputMonitorManager = InputMonitorManager()
-        self.inputMonitorManager?.delegate = self.hotkeyManager
-        self.inputMonitorManager?.startMonitoring()
+        self.inputMonitorManager?.delegate = self.hotkeyManager // HotkeyManager implements the delegate protocol
 
-        // 7. Initialize and Start AppActivationMonitor
-        if let evtMgr = self.eventManager { // Ensure eventManager is available
-            self.appActivationMonitor = AppActivationMonitor(eventManager: evtMgr)
-            self.appActivationMonitor?.startMonitoring()
-        } else {
-            RedEyeLogger.fault("EventManager not available for AppActivationMonitor. App activation events will not be monitored.", category: "AppDelegate")
-        }
+        // 7. App Activation Monitor (Needs EventManager)
+        self.appActivationMonitor = AppActivationMonitor(eventManager: evtManager)
+        
+        // 8. FS Event Monitor (Needs EventManager as delegate)
+        self.fsEventMonitorManager = FSEventMonitorManager(delegate: evtManager) // Pass EventManager as delegate
+        // Optional: Add developer toggle for FS Monitor here if needed
+        // self.fsEventMonitorManager?.isEnabled = false // Example: Disable FS monitor
 
-        // 8. Initialize and Start FSEventMonitorManager
-        if let evtMgr = self.eventManager { // Ensure eventManager is available and can act as delegate
-            self.fsEventMonitorManager = FSEventMonitorManager(delegate: evtMgr) // Pass EventManager as delegate
-            self.fsEventMonitorManager?.startMonitoring() // Start monitoring default paths
-        } else {
-            RedEyeLogger.fault("EventManager not available for FSEventMonitorManager. File system events will not be monitored.", category: "AppDelegate")
-        }
-
+        // 9. Keyboard Monitor (Needs EventManager as delegate) <<< NEW
+        self.keyboardMonitorManager = KeyboardMonitorManager(delegate: evtManager) // Pass EventManager as delegate
+        // Optional: Add developer toggle for Keyboard Monitor
+        // self.keyboardMonitorManager?.isEnabled = false // Example: Disable keyboard monitor
+        
+        // --- Start Services ---
+        
+        self.webSocketServerManager?.startServer()
+        self.inputMonitorManager?.startMonitoring() // Start mouse monitor
+        self.appActivationMonitor?.startMonitoring()
+        self.fsEventMonitorManager?.startMonitoring() // Start FS monitor
+        self.keyboardMonitorManager?.startMonitoring() // Start keyboard monitor <<< NEW
+        
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -83,44 +82,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit RedEye", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
         
-        RedEyeLogger.info("RedEye application finished launching. Status item should be visible.", category: "AppDelegate")
+        RedEyeLogger.info("RedEye application finished launching. All managers initialized. Monitors started.", category: "AppDelegate")
 
         // Enable verbose logging for DEBUG builds
         #if DEBUG
         RedEyeLogger.isVerboseLoggingEnabled = true
-        // Using a standard print here is acceptable as it's a one-time developer note during startup
         print("RedEye Dev Note: Verbose debug logging is ENABLED (DEBUG build).")
-        RedEyeLogger.debug("This is a test debug message from AppDelegate.", category: "AppDelegate")
         #else
-        // Using a standard print here for a release build note is also fine if desired
         print("RedEye Info: Verbose debug logging is DISABLED (Release build).")
         #endif
+        
+        // Initial permission checks (Accessibility is checked above)
+        // Input Monitoring check/prompt happens inside KeyboardMonitorManager.startMonitoring()
+        // Future: Check other potential permissions here if needed (e.g., Full Disk Access if FSEvents configured broadly)
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
         RedEyeLogger.info("RedEye application will terminate. Stopping services...", category: "AppDelegate")
-        webSocketServerManager?.stopServer()
-        inputMonitorManager?.stopMonitoring()
-        appActivationMonitor?.stopMonitoring()
+        // Stop in reverse order of start, generally
+        keyboardMonitorManager?.stopMonitoring() // <<< NEW
         fsEventMonitorManager?.stopMonitoring()
+        appActivationMonitor?.stopMonitoring()
+        inputMonitorManager?.stopMonitoring()
+        webSocketServerManager?.stopServer()
+        // Other managers (HotkeyManager, EventManager, PluginManager, UIManager) don't have explicit stop methods currently.
     }
     
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         return true
     }
     
+    // Renamed for clarity, as it can prompt.
+    @discardableResult // Allow ignoring return value
     func checkAndRequestAccessibilityPermissions() -> Bool {
-        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
-        let accessEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
-        if accessEnabled {
-            RedEyeLogger.info("Accessibility permissions: Granted.", category: "AppDelegate")
-            return true
+        // Check status first without prompting
+        let currentStatus = AXIsProcessTrusted()
+        if currentStatus {
+             RedEyeLogger.info("Accessibility permissions: Granted.", category: "AppDelegate")
+             return true
         } else {
-            RedEyeLogger.error("Accessibility permissions: Not granted. The user may have been prompted.", category: "AppDelegate")
-            RedEyeLogger.error("Please grant Accessibility access to RedEye in System Settings > Privacy & Security > Accessibility, then relaunch the app if features aren't working.", category: "AppDelegate")
-            // For this step, we rely on the system prompt. If it fails or the user denies,
-            // they'll need to go to System Settings manually.
-            return false
+             RedEyeLogger.info("Accessibility permissions: Not granted. Requesting...", category: "AppDelegate")
+             // Use prompt option
+             let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true]
+             let accessEnabled = AXIsProcessTrustedWithOptions(options as CFDictionary)
+             if !accessEnabled {
+                  RedEyeLogger.error("Accessibility permissions still not granted after prompt (or prompt failed). The user may need to grant manually in System Settings.", category: "AppDelegate")
+             } else {
+                 // Note: Even if it returns true here, sometimes a restart is needed for changes to fully apply.
+                 RedEyeLogger.info("Accessibility permissions prompt acknowledged. Status may require app restart to be fully effective if granted.", category: "AppDelegate")
+             }
+             return accessEnabled
         }
     }
     

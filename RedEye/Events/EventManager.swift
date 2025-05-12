@@ -1,13 +1,9 @@
-//
-//  EventManager.swift
-//  RedEye
-//
-//  Created by Vicente Sosa on 5/9/25.
-//
+// RedEye/Events/EventManager.swift
 
 import Foundation
 
-class EventManager: FSEventMonitorDelegate { // <-- Adopt the protocol
+// Adopt KeyboardEventMonitorDelegate
+class EventManager: FSEventMonitorDelegate, KeyboardEventMonitorDelegate {
     private let jsonEncoder: JSONEncoder
     private weak var webSocketServerManager: WebSocketServerManager? // Make it weak to avoid retain cycles if WSSM might ever hold EventManager
 
@@ -50,4 +46,11 @@ class EventManager: FSEventMonitorDelegate { // <-- Adopt the protocol
         emit(event: event)
     }
 
+    // MARK: - KeyboardEventMonitorDelegate <<< NEW
+        
+    func keyboardEventMonitor(_ monitor: KeyboardMonitorManager, didEmit event: RedEyeEvent) {
+        RedEyeLogger.info("EventManager received event from KeyboardMonitor.", category: "EventManager")
+        // Simply pass the received event to the main emit flow
+        emit(event: event)
+    }
 }
