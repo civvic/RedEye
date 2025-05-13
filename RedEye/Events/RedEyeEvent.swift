@@ -9,7 +9,8 @@ enum RedEyeEventType: String, Codable {
     case textSelection
     case applicationActivated
     case fileSystemEvent
-    case keyboardEvent // <<< NEW
+    case keyboardEvent
+    case browserNavigation
     // Add other event types here later, e.g., fileSelection, screenshotTaken
 }
 
