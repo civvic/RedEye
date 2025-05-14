@@ -27,27 +27,17 @@ private func keyboardEventTapCallback(proxy: CGEventTapProxy, type: CGEventType,
 }
 // --- End C Callback Function ---
 
-// Define a protocol for emitting events, similar to FSEventMonitorManager.
-// This promotes decoupling from EventManager, preparing for the EventBus refactor.
-protocol KeyboardEventMonitorDelegate: AnyObject {
-    func keyboardEventMonitor(_ monitor: KeyboardMonitorManager, didEmit event: RedEyeEvent)
-}
-
 class KeyboardMonitorManager {
 
-    // MARK: - Properties
     private static let logCategory = "KeyboardMonitor"
-    weak var delegate: KeyboardEventMonitorDelegate?
+    private let eventBus: EventBus
     var isEnabled: Bool = true
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
-
-    // Keep track of permission state
     private var hasInputMonitoringPermission: Bool = false
 
-    // MARK: - Initialization
-    init(delegate: KeyboardEventMonitorDelegate?) {
-        self.delegate = delegate
+    init(eventBus: EventBus) {
+        self.eventBus = eventBus
         RedEyeLogger.info("KeyboardMonitorManager initialized.", category: KeyboardMonitorManager.logCategory)
     }
 
@@ -55,8 +45,6 @@ class KeyboardMonitorManager {
         stopMonitoring()
         RedEyeLogger.info("KeyboardMonitorManager deinitialized.", category: KeyboardMonitorManager.logCategory)
     }
-
-    // MARK: - Permission Handling
 
     /// Checks the current Input Monitoring permission status.
     /// Optionally prompts the user if permission is not granted.
@@ -92,7 +80,6 @@ class KeyboardMonitorManager {
         }
     }
 
-    // MARK: - Public Methods: Start/Stop Monitoring
     func startMonitoring() {
         guard isEnabled else {
             RedEyeLogger.info("Keyboard monitoring is disabled by toggle.", category: KeyboardMonitorManager.logCategory)
@@ -182,8 +169,6 @@ class KeyboardMonitorManager {
 
         RedEyeLogger.info("Keyboard event monitoring stopped and resources released.", category: KeyboardMonitorManager.logCategory)
     }
-
-    // MARK: - Private Event Handling Logic (Called by C callback)
     
     func handleEventTap(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
         
@@ -247,8 +232,8 @@ class KeyboardMonitorManager {
             metadata: metadata
         )
 
-        // Emit the event via the delegate
-        delegate?.keyboardEventMonitor(self, didEmit: redEyeEvent)
+        // Emit the event via the eventBus
+        eventBus.publish(event: redEyeEvent)
 
         // Pass the event through unmodified
         return Unmanaged.passUnretained(event)

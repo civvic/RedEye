@@ -4,34 +4,24 @@ import Foundation
 import CoreServices
 
 // Define a protocol for emitting events. This can be implemented by EventManager or the future EventBus.
-protocol FSEventMonitorDelegate: AnyObject {
-    func fsEventMonitor(_ monitor: FSEventMonitorManager, didEmit event: RedEyeEvent)
-}
+// protocol FSEventMonitorDelegate: AnyObject {
+//     func fsEventMonitor(_ monitor: FSEventMonitorManager, didEmit event: RedEyeEvent)
+// }
 
 class FSEventMonitorManager {
 
-    // MARK: - Properties
-
     private static let logCategory = "FSEventMonitor"
-
-    // FSEvents related properties
     private var streamRef: FSEventStreamRef?
     private var pathsToWatch: [String] = []
     private var dispatchQueue: DispatchQueue // Use a dispatch queue instead of RunLoop
-
-    // Developer Toggle
     var isEnabled: Bool = true
 
-    // Delegate for sending events out
-    weak var delegate: FSEventMonitorDelegate?
+    private let eventBus: EventBus
 
-    // Context to pass 'self' to the C callback
     private var callbackContext: FSEventStreamContext
 
-    // MARK: - Initialization
-
-    init(paths: [String] = [], delegate: FSEventMonitorDelegate?, queueLabel: String = "com.vic.RedEye.FSEventMonitorQueue") {
-        self.delegate = delegate
+    init(paths: [String] = [], eventBus: EventBus, queueLabel: String = "com.vic.RedEye.FSEventMonitorQueue") {
+        self.eventBus = eventBus
         // Create a dedicated serial queue for handling FSEvents callbacks
         // QoS can be adjusted based on performance needs (.userInitiated or .utility often suitable)
         self.dispatchQueue = DispatchQueue(label: queueLabel, qos: .utility)
@@ -46,8 +36,6 @@ class FSEventMonitorManager {
         stopMonitoring()
         RedEyeLogger.info("FSEventMonitorManager deinitialized", category: FSEventMonitorManager.logCategory)
     }
-
-    // MARK: - Configuration
 
     private func defaultPaths() -> [String] {
         // Correctly get directory URLs from FileManager.default
@@ -78,8 +66,6 @@ class FSEventMonitorManager {
             startMonitoring()
         }
     }
-
-    // MARK: - Public Methods: Start/Stop Monitoring
 
     func startMonitoring() {
         guard isEnabled else {
@@ -162,8 +148,6 @@ class FSEventMonitorManager {
         RedEyeLogger.info("FSEvent monitoring stopped and stream released.", category: FSEventMonitorManager.logCategory)
     }
 
-    // MARK: - Private FSEvents Handling (Called by C callback via Dispatch Queue)
-
     private func handleFSEvents(numEvents: Int, eventPaths: UnsafeRawPointer, eventFlags: UnsafePointer<FSEventStreamEventFlags>, eventIds: UnsafePointer<FSEventStreamEventId>) {
         // This method now executes on self.dispatchQueue
 
@@ -203,9 +187,7 @@ class FSEventMonitorManager {
              )
             // --- End Event Creation ---
 
-            // Emit the event via delegate (ensure delegate calls are safe if needed,
-            // though emitting to EventManager/EventBus should handle thread safety)
-            delegate?.fsEventMonitor(self, didEmit: event)
+            eventBus.publish(event: event)
         }
     }
 

@@ -5,7 +5,7 @@ import Foundation // For NSAppleScript
 
 class AppActivationMonitor {
 
-    private let eventManager: EventManager
+    private let eventBus: EventBus
     private var lastKnownActiveBundleID: String? // To avoid duplicate events if possible
     private var notificationObserver: NSObjectProtocol? // Store the observer to remove it correctly
 
@@ -16,8 +16,8 @@ class AppActivationMonitor {
     private let safariBundleID = "com.apple.Safari"
     private var appleScriptSafariURLTitle: NSAppleScript?
 
-    init(eventManager: EventManager) {
-        self.eventManager = eventManager
+    init(eventBus: EventBus) {
+        self.eventBus = eventBus
         RedEyeLogger.info("AppActivationMonitor initialized.", category: "AppActivationMonitor")
         
         // Pre-compile the AppleScript for Safari URL capture
@@ -102,7 +102,7 @@ class AppActivationMonitor {
                     sourceBundleIdentifier: bundleId,
                     metadata: ["pid": "\(activatedApp.processIdentifier)"]
                 )
-                eventManager.emit(event: event)
+                eventBus.publish(event: event)
             }
         }
         lastKnownActiveBundleID = bundleId // Update last known ID regardless of general toggle
@@ -126,7 +126,8 @@ class AppActivationMonitor {
             var errorInfo: NSDictionary?
             let resultDescriptor = script.executeAndReturnError(&errorInfo)
 
-            DispatchQueue.main.async { // Switch back to main thread for event emission
+            DispatchQueue.main.async { [weak self] in // Switch back to main thread for event emission; capture self weakly here
+                guard let self = self else { return } // Ensure self is valid
                 if let error = errorInfo {
                     let errorMessage = (error[NSAppleScript.errorAppName] as? String ?? "AppleScript Error") +
                                      ": " + (error[NSAppleScript.errorMessage] as? String ?? "Unknown error") +
@@ -180,7 +181,7 @@ class AppActivationMonitor {
                     // contextText: pageTitle, // Or keep contextText nil and use metadata
                     metadata: metadata
                 )
-                self.eventManager.emit(event: event)
+                self.eventBus.publish(event: event)
             }
         }
     }
@@ -196,6 +197,6 @@ class AppActivationMonitor {
             sourceBundleIdentifier: bundleId,
             metadata: metadata
         )
-        self.eventManager.emit(event: event)
+        self.eventBus.publish(event: event)
     }
 }

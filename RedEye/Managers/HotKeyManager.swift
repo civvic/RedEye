@@ -1,9 +1,4 @@
-//
-//  HotKeyManager.swift
-//  RedEye
-//
-//  Created by Vicente Sosa on 5/8/25.
-//
+// RedEye/Managers/HotkeyManager.swift
 
 import Foundation
 import AppKit // For NSWorkspace and accessibility elements
@@ -17,14 +12,13 @@ extension KeyboardShortcuts.Name {
 
 class HotkeyManager: InputMonitorManagerDelegate {
 
-    private let eventManager: EventManager
+    private let eventBus: EventBus
     private let uiManager: UIManager
-    private var lastMouseSelectedText: String? // <--- ADD THIS to store last mouse-captured text
+    private var lastMouseSelectedText: String?
 
-    // Modify init to accept EventManager and UIManager
-    init(eventManager: EventManager, uiManager: UIManager) {
-        self.eventManager = eventManager
-        self.uiManager = uiManager // Store the UIManager
+    init(eventBus: EventBus, uiManager: UIManager) {
+        self.uiManager = uiManager
+        self.eventBus = eventBus
         setupHotkeyListeners()
     }
 
@@ -38,14 +32,13 @@ class HotkeyManager: InputMonitorManagerDelegate {
     // Renamed and generalized original hotkey handler
     private func handleTextCaptureTrigger(isHotkey: Bool, mousePositionForUI: NSPoint) {
         let triggerType = isHotkey ? "hotkey (⌘⇧C)" : "mouse_selection"
-//        RedEyeLogger.info("Attempting to capture selected text (Trigger: \(triggerType))...", category: "HotKeyManager")
 
         // --- Accessibility & Text Fetching Logic (largely the same) ---
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
             // ... (error handling for no frontmost app, include triggerType in metadata) ...
             RedEyeLogger.error("Could not determine frontmost app. (Trigger: \(triggerType))", category: "HotKeyManager")
             let errorEvent = RedEyeEvent(eventType: .textSelection, metadata: ["error": "Could not determine frontmost app", "trigger": triggerType])
-            eventManager.emit(event: errorEvent)
+            eventBus.publish(event: errorEvent)
             return
         }
 
@@ -64,7 +57,7 @@ class HotkeyManager: InputMonitorManagerDelegate {
                 sourceBundleIdentifier: bundleId,
                 metadata: ["error": "Error getting focused UI: \(focusError.rawValue)", "trigger": triggerType]
             )
-            eventManager.emit(event: errorEvent)
+            eventBus.publish(event: errorEvent)
             return
         }
         
@@ -75,7 +68,7 @@ class HotkeyManager: InputMonitorManagerDelegate {
                 sourceBundleIdentifier: bundleId,
                 metadata: ["error": "Focused UI element nil.", "trigger": triggerType]
             )
-            eventManager.emit(event: errorEvent)
+            eventBus.publish(event: errorEvent)
             return
         }
 
@@ -125,7 +118,7 @@ class HotkeyManager: InputMonitorManagerDelegate {
             contextText: capturedText, // It's already nil if empty or error, or non-empty here for mouse
             metadata: metadata
         )
-        eventManager.emit(event: event)
+        eventBus.publish(event: event)
 
         // Show UI panel only if text is actually captured and non-empty
         if let textToShowInPanel = capturedText, !textToShowInPanel.isEmpty {

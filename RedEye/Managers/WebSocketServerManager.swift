@@ -1,39 +1,54 @@
+// RedEye/Managers/WebSocketServerManager.swift
+
 import Foundation
 import NIOCore
-import NIOPosix // For MultiThreadedEventLoopGroup
-import NIOHTTP1 // For HTTPRequestHead, configureHTTPServerPipeline
-import NIOWebSocket // For NIOWebSocketServerUpgrader, WebSocketErrorCode
-import WebSocketKit // For WebSocket object and WebSocket.server
+import NIOPosix
+import NIOHTTP1
+import NIOWebSocket
+import WebSocketKit
 
-class WebSocketServerManager {
+// Make WebSocketServerManager conform to EventBusSubscriber <<< NEW
+class WebSocketServerManager: EventBusSubscriber {
 
+    private static let logCategory = "WebSocketServerManager"
+    
     private let port: Int = 8765
     private var serverChannel: Channel?
     private var group: EventLoopGroup?
     private var connectedClients: [UUID: WebSocket] = [:]
+    private let jsonEncoder: JSONEncoder
+    private let jsonDecoder: JSONDecoder
 
-    // Add this encoder at the class level for reuse
-    private let jsonEncoder: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys] // Or just .sortedKeys for compactness over network
-        encoder.dateEncodingStrategy = .iso8601
-        return encoder
-    }()
+    private weak var eventBus: EventBus?
+    private var isSubscribedToBus: Bool = false
 
-    private let jsonDecoder: JSONDecoder = {
-        let decoder = JSONDecoder()
-        // Configure if needed, e.g., dateDecodingStrategy, though not used by current IPCCommand
-        return decoder
-    }()
-
-    init() {
-        self.group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
+    init(eventBus: EventBus) {
+        self.eventBus = eventBus
+        self.group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount) // Use System.coreCount
+        self.jsonEncoder = {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.sortedKeys] // More compact for network
+            encoder.dateEncodingStrategy = .iso8601
+            return encoder
+        }()
+        self.jsonDecoder = {
+            let decoder = JSONDecoder()
+            return decoder
+        }()
+        RedEyeLogger.info("WebSocketServerManager initialized.", category: WebSocketServerManager.logCategory)
     }
 
     func startServer() {
         guard let group = self.group else {
             RedEyeLogger.error("EventLoopGroup not initialized.", category: "WebSocketServerManager")
             return
+        }
+        
+        // Subscribe to the event bus if not already
+        if let bus = self.eventBus, !isSubscribedToBus {
+            bus.subscribe(self)
+            isSubscribedToBus = true
+            RedEyeLogger.info("WebSocketServerManager subscribed to EventBus.", category: WebSocketServerManager.logCategory)
         }
 
         // This is the pattern from WebSocketKitTests/Utilities.swift, inlined:
@@ -177,8 +192,6 @@ class WebSocketServerManager {
         }
     }
 
-    // MARK: - Action Handlers
-
     private func handleLogMessageFromServer(payload: [String: JSONValue]?, clientID: UUID, commandId: String?, webSocket: WebSocket) async {
         RedEyeLogger.info("Handling 'logMessageFromServer' from client \(clientID)", category: "WebSocketServerManager")
 
@@ -232,34 +245,43 @@ class WebSocketServerManager {
     // private func sendAckResponse(to webSocket: WebSocket, commandId: String?, message: String) async { ... }
     // private func sendErrorResponse(to webSocket: WebSocket, commandId: String?, message: String) async { ... }
     
-    public func broadcastEvent(_ event: RedEyeEvent) {
+    // This method is NO LONGER CALLED EXTERNALLY by EventManager.
+    // It will be triggered by handleEvent from EventBusSubscriber conformance.
+    private func broadcastEventToClients(_ event: RedEyeEvent) {
         do {
-            let jsonData = try self.jsonEncoder.encode(event) // Use Self.jsonEncoder
+            let jsonData = try self.jsonEncoder.encode(event)
             guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-                RedEyeLogger.error("Failed to convert RedEyeEvent to JSON string for broadcasting.", category: "WebSocketServerManager")
+                RedEyeLogger.error("Failed to convert RedEyeEvent to JSON string for broadcasting.", category: WebSocketServerManager.logCategory)
                 return
             }
 
             if connectedClients.isEmpty {
-                RedEyeLogger.debug("No WebSocket clients connected. Event not broadcasted.", category: "WebSocketServerManager")
+                // EventBus already logs if no subscribers; WSSM might still want to log this specific state.
+                RedEyeLogger.debug("No WebSocket clients connected. Event from bus not broadcasted.", category: WebSocketServerManager.logCategory)
                 return
             }
 
-            RedEyeLogger.info("Broadcasting event (\(event.eventType)) to \(connectedClients.count) client(s).", category: "WebSocketServerManager")
-            // RedEyeLogger.debug("Event JSON for broadcast: \(jsonString)", category: "WebSocketServerManager") // Can be verbose
+            RedEyeLogger.debug("Broadcasting event (\(event.eventType)) from bus to \(connectedClients.count) client(s).", category: WebSocketServerManager.logCategory)
+            // RedEyeLogger.debug("Event JSON for broadcast: \(jsonString)", category: "WebSocketServerManager")
 
             for (clientID, ws) in connectedClients {
-                RedEyeLogger.debug("Sending event to client \(clientID).", category: "WebSocketServerManager")
-                ws.send(jsonString) // WebSocketKit's send method takes a String directly
+                // RedEyeLogger.debug("Sending event to client \(clientID).", category: WebSocketServerManager.logCategory)
+                ws.send(jsonString)
             }
         } catch {
-            RedEyeLogger.error("Failed to encode RedEyeEvent for broadcasting: \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
+            RedEyeLogger.error("Failed to encode RedEyeEvent for broadcasting: \(error.localizedDescription)", category: WebSocketServerManager.logCategory, error: error)
         }
     }
 
     func stopServer() {
         RedEyeLogger.info("Attempting to stop WebSocket server...", category: "WebSocketServerManager")
         
+        if let bus = self.eventBus, isSubscribedToBus {
+            bus.unsubscribe(self)
+            isSubscribedToBus = false
+            RedEyeLogger.info("WebSocketServerManager unsubscribed from EventBus.", category: WebSocketServerManager.logCategory)
+        }
+
         for (id, ws) in connectedClients {
             RedEyeLogger.info("Closing connection to client \(id)...", category: "WebSocketServerManager")
             ws.close(code: .goingAway, promise: nil)
@@ -287,4 +309,16 @@ class WebSocketServerManager {
         self.serverChannel = nil
     }
     
+    // MARK: - EventBusSubscriber Conformance
+    func handleEvent(_ event: RedEyeEvent, on eventBus: EventBus) {
+        // This method will be called by the MainEventBus on the main thread.
+        RedEyeLogger.debug("WebSocketServerManager received event \(event.eventType) from EventBus.", category: WebSocketServerManager.logCategory)
+        
+        // The actual broadcast involves network I/O, so it's good practice
+        // to ensure it happens on the appropriate thread (WebSocketKit handles this via EventLoop).
+        // Since broadcastEventToClients uses ws.send(), which is designed to be called
+        // from any thread (it will hop to its EventLoop if necessary), calling it directly is fine.
+        broadcastEventToClients(event)
+    }
+
 }
