@@ -7,7 +7,6 @@ import NIOHTTP1
 import NIOWebSocket
 import WebSocketKit
 
-// Make WebSocketServerManager conform to EventBusSubscriber <<< NEW
 class WebSocketServerManager: EventBusSubscriber {
 
     private static let logCategory = "WebSocketServerManager"
@@ -17,23 +16,21 @@ class WebSocketServerManager: EventBusSubscriber {
     private var group: EventLoopGroup?
     private var connectedClients: [UUID: WebSocket] = [:]
     private let jsonEncoder: JSONEncoder
-    private let jsonDecoder: JSONDecoder
 
     private weak var eventBus: EventBus?
     private var isSubscribedToBus: Bool = false
 
-    init(eventBus: EventBus) {
+    private let ipcCommandHandler: IPCCommandHandler
+
+    init(eventBus: EventBus, ipcCommandHandler: IPCCommandHandler) {
         self.eventBus = eventBus
+        self.ipcCommandHandler = ipcCommandHandler
         self.group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount) // Use System.coreCount
         self.jsonEncoder = {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys] // More compact for network
             encoder.dateEncodingStrategy = .iso8601
             return encoder
-        }()
-        self.jsonDecoder = {
-            let decoder = JSONDecoder()
-            return decoder
         }()
         RedEyeLogger.info("WebSocketServerManager initialized.", category: WebSocketServerManager.logCategory)
     }
@@ -111,37 +108,19 @@ class WebSocketServerManager: EventBusSubscriber {
         RedEyeLogger.info("WebSocket client connected: \(clientID) from URI: \(requestHead.uri)", category: "WebSocketServerManager")
         self.connectedClients[clientID] = webSocket
 
-        webSocket.onText { [weak self] ws, text in
-            guard let self = self else { return } // 'self' is WebSocketServerManager here
+        webSocket.onText { [weak self] ws, text in // ws is WebSocketKit.WebSocket
+            guard let self = self else { return }
 
-            RedEyeLogger.debug("Received text from client \(clientID): \(text)", category: "WebSocketServerManager")
-
-            guard let commandData = text.data(using: .utf8) else {
-                RedEyeLogger.error("Could not convert incoming text to Data for client \(clientID). Text: \(text)", category: "WebSocketServerManager")
-                // Optionally, send an error response back to the client
-                // ws.send("Error: Invalid UTF-8 in command.")
-                return
-            }
-
-            do {
-                let receivedCommand = try self.jsonDecoder.decode(IPCReceivedCommand.self, from: commandData)
-                RedEyeLogger.info("Successfully decoded command: \(receivedCommand.action) from client \(clientID)", category: "WebSocketServerManager")
-                
-                // Offload actual command processing to avoid blocking the EventLoop
-                Task { // Create a new Task for concurrent execution
-                    await self.routeCommand(receivedCommand, fromClient: clientID, webSocket: ws)
-                }
-
-            } catch {
-                RedEyeLogger.error("Failed to decode IPC command from client \(clientID): \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
-                RedEyeLogger.debug("Problematic JSON string from client \(clientID): \(text)", category: "WebSocketServerManager")
-                // Optionally, send an error response back to the client
-                // let errorResponse = """
-                // {"status": "error", "message": "Failed to decode command: \(error.localizedDescription.escapedForJSON())"}
-                // """
-                // ws.send(errorResponse)
+            RedEyeLogger.debug("Received text from client \(clientID): \(text)", category: WebSocketServerManager.logCategory)
+            
+            // Delegate command handling to IPCCommandHandler <<< MODIFIED
+            // Offload to a new Task to ensure this NIO EventLoop callback returns quickly.
+            Task {
+                await self.ipcCommandHandler.handleRawCommand(text, from: clientID /*, webSocket: ws */)
+                // If handleRawCommand needed to send direct replies, we'd pass 'ws' (the WebSocket object)
             }
         }
+        
         webSocket.onBinary { [weak self] ws, buffer in
             guard let self = self else { return }
             RedEyeLogger.debug("Received binary data from client \(clientID). Length: \(buffer.readableBytes)", category: "WebSocketServerManager")
@@ -170,77 +149,7 @@ class WebSocketServerManager: EventBusSubscriber {
              RedEyeLogger.debug("Received Pong from client \(clientID). Data: \(data.readableBytes) bytes", category: "WebSocketServerManager")
         }
     }
-
-    private func routeCommand(_ command: IPCReceivedCommand, fromClient clientID: UUID, webSocket: WebSocket) async {
-        RedEyeLogger.info("Routing command '\(command.action)' (ID: \(command.commandId ?? "N/A")) from client \(clientID)", category: "WebSocketServerManager")
-
-        // Attempt to map the action string to our IPCAction enum
-        guard let action = IPCAction(rawValue: command.action) else {
-            RedEyeLogger.error("Unknown action '\(command.action)' received from client \(clientID).", category: "WebSocketServerManager")
-            // Optionally send an error response back to the client
-            // await sendErrorResponse(to: webSocket, commandId: command.commandId, message: "Unknown action: \(command.action)")
-            return
-        }
-
-        // Switch on the known action
-        switch action {
-        case .logMessageFromServer:
-            await handleLogMessageFromServer(payload: command.payload, clientID: clientID, commandId: command.commandId, webSocket: webSocket)
-        // Add other cases here as we define more actions
-        // case .requestTextManipulation:
-        //     RedEyeLogger.info("Placeholder for \(action.rawValue)", category: "WebSocketServerManager")
-        }
-    }
-
-    private func handleLogMessageFromServer(payload: [String: JSONValue]?, clientID: UUID, commandId: String?, webSocket: WebSocket) async {
-        RedEyeLogger.info("Handling 'logMessageFromServer' from client \(clientID)", category: "WebSocketServerManager")
-
-        guard let payloadDict = payload else {
-            RedEyeLogger.error("'logMessageFromServer' received without a payload from client \(clientID).", category: "WebSocketServerManager")
-            // await sendErrorResponse(to: webSocket, commandId: commandId, message: "Payload missing for logMessageFromServer")
-            return
-        }
-
-        // Attempt to decode the generic payload into our specific LogMessagePayload struct
-        // For this, we need to convert [String: JSONValue] back to Data, then decode.
-        // This is a bit round-about. A more direct decoding from JSONValue dictionary to struct might be possible
-        // with a custom decoder or by making LogMessagePayload use JSONValue directly.
-        // For now, let's try the Data conversion route for simplicity, though it's less efficient.
-
-        do {
-            // Convert the [String: JSONValue] payload back to JSON Data
-            let payloadData = try JSONSerialization.data(withJSONObject: payloadDict.mapValues { convertJSONValueToAny($0) })
-                                                    // Using a temporary helper function to convert JSONValue to Any for JSONSerialization
-            
-            // Now decode this Data into our specific payload struct
-            let logPayload = try self.jsonDecoder.decode(LogMessagePayload.self, from: payloadData)
-            
-            RedEyeLogger.info("Message from client \(clientID) (via IPC command): \(logPayload.message)", category: "IPCMessageHandler") // Log to a specific category
-            
-            // Optional: Send acknowledgement (Phase 5)
-            // await sendAckResponse(to: webSocket, commandId: commandId, message: "Message logged successfully.")
-
-        } catch {
-            RedEyeLogger.error("Failed to decode LogMessagePayload or process 'logMessageFromServer' from client \(clientID): \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
-            RedEyeLogger.debug("Problematic payload for logMessageFromServer: \(payloadDict)", category: "WebSocketServerManager")
-            // await sendErrorResponse(to: webSocket, commandId: commandId, message: "Invalid payload for logMessageFromServer: \(error.localizedDescription)")
-        }
-    }
-    
-    // Helper function to convert JSONValue to a type that JSONSerialization can handle
-    // This is needed because JSONSerialization.data(withJSONObject:) expects standard Swift types.
-    private func convertJSONValueToAny(_ jsonValue: JSONValue) -> Any {
-        switch jsonValue {
-        case .string(let s): return s
-        case .int(let i): return i
-        case .double(let d): return d
-        case .bool(let b): return b
-        case .array(let a): return a.map { convertJSONValueToAny($0) }
-        case .dictionary(let dict): return dict.mapValues { convertJSONValueToAny($0) }
-        case .null: return NSNull() // JSONSerialization uses NSNull for null
-        }
-    }
-    
+        
     // Placeholder for sending acknowledgements (Phase 5)
     // private func sendAckResponse(to webSocket: WebSocket, commandId: String?, message: String) async { ... }
     // private func sendErrorResponse(to webSocket: WebSocket, commandId: String?, message: String) async { ... }

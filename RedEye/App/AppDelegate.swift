@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     var statusItem: NSStatusItem?
     let eventBus: EventBus = MainEventBus()
+    let ipcCommandHandler: IPCCommandHandler = IPCCommandHandler()
 
     var pluginManager: PluginManager?
     var uiManager: UIManager?
@@ -29,7 +30,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         self.pluginManager = PluginManager()
         
         // WebSocketServerManager will now subscribe to the EventBus
-        self.webSocketServerManager = WebSocketServerManager(eventBus: self.eventBus) // <<< MODIFIED
+        self.webSocketServerManager = WebSocketServerManager(eventBus: self.eventBus, ipcCommandHandler: self.ipcCommandHandler)
         
         guard let pManager = self.pluginManager, let wsManager = self.webSocketServerManager else {
             fatalError("CRITICAL ERROR: Core managers could not be initialized.")
