@@ -40,18 +40,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         guard let uiMgr = self.uiManager else { fatalError("CRITICAL ERROR: UIManager") }
 
         // Managers that previously used EventManager now get EventBus
-        self.hotkeyManager = HotkeyManager(eventBus: self.eventBus, uiManager: uiMgr) // <<< MODIFIED
+        self.hotkeyManager = HotkeyManager(eventBus: self.eventBus, uiManager: uiMgr)
         
         self.inputMonitorManager = InputMonitorManager() // Delegate remains HotkeyManager
         self.inputMonitorManager?.delegate = self.hotkeyManager
         
-        self.appActivationMonitor = AppActivationMonitor(eventBus: self.eventBus) // <<< MODIFIED
-        self.fsEventMonitorManager = FSEventMonitorManager(eventBus: self.eventBus) // <<< MODIFIED
-        self.keyboardMonitorManager = KeyboardMonitorManager(eventBus: self.eventBus) // <<< MODIFIED
+        self.appActivationMonitor = AppActivationMonitor(eventBus: self.eventBus)
+        self.fsEventMonitorManager = FSEventMonitorManager(eventBus: self.eventBus)
+        self.keyboardMonitorManager = KeyboardMonitorManager(eventBus: self.eventBus)
 
         // --- Default Monitor States ---
         RedEyeLogger.info("Setting default monitor states (disabled). Modify in AppDelegate for testing.", category: "AppDelegate")
-        self.inputMonitorManager?.isEnabled = false
+        self.hotkeyManager?.isHotkeyUiEnabled = false  // Keeps ⌘⇧C text capture events active but suppresses the UI panel for the hotkey
+        self.inputMonitorManager?.isEnabled = false  // Disables mouse selection events AND its UI.
         self.appActivationMonitor?.isEnabled = false
         self.appActivationMonitor?.isEnabledBrowserURLCapture = false
         self.fsEventMonitorManager?.isEnabled = false

@@ -16,6 +16,9 @@ class HotkeyManager: InputMonitorManagerDelegate {
     private let uiManager: UIManager
     private var lastMouseSelectedText: String?
 
+    // MARK: - Developer Toggle for UI Panel
+    var isHotkeyUiEnabled: Bool = true // Default to true, can be set by AppDelegate
+    
     init(eventBus: EventBus, uiManager: UIManager) {
         self.uiManager = uiManager
         self.eventBus = eventBus
@@ -29,7 +32,6 @@ class HotkeyManager: InputMonitorManagerDelegate {
         RedEyeLogger.info("Listener for ⌘⇧C (captureSelectedText) is set up.", category: "HotKeyManager")
     }
 
-    // Renamed and generalized original hotkey handler
     private func handleTextCaptureTrigger(isHotkey: Bool, mousePositionForUI: NSPoint) {
         let triggerType = isHotkey ? "hotkey (⌘⇧C)" : "mouse_selection"
 
@@ -121,17 +123,26 @@ class HotkeyManager: InputMonitorManagerDelegate {
         eventBus.publish(event: event)
 
         // Show UI panel only if text is actually captured and non-empty
+        // AND if the hotkey UI is enabled (for hotkey triggers)
         if let textToShowInPanel = capturedText, !textToShowInPanel.isEmpty {
-            RedEyeLogger.info("Captured text \"\(textToShowInPanel)\". Requesting UI panel at \(mousePositionForUI).", category: "HotKeyManager")
-            uiManager.showPluginActionsPanel(near: mousePositionForUI, withContextText: textToShowInPanel)
+            if isHotkey { // This was a hotkey trigger
+                if isHotkeyUiEnabled { // <<< CHECK THE NEW FLAG
+                    RedEyeLogger.info("Captured text \"\(textToShowInPanel)\" via Hotkey. Requesting UI panel at \(mousePositionForUI).", category: "HotKeyManager")
+                    uiManager.showPluginActionsPanel(near: mousePositionForUI, withContextText: textToShowInPanel)
+                } else {
+                    RedEyeLogger.info("Captured text \"\(textToShowInPanel)\" via Hotkey. UI panel suppressed by toggle.", category: "HotKeyManager")
+                }
+            } else { // This was a mouse trigger (shortcut-less)
+                // For mouse triggers, the UI is implicitly controlled by InputMonitorManager.isEnabled.
+                // If IMM is disabled, we wouldn't get here. So if we are here, show it.
+                RedEyeLogger.info("Captured text \"\(textToShowInPanel)\" via Mouse. Requesting UI panel at \(mousePositionForUI).", category: "HotKeyManager")
+                uiManager.showPluginActionsPanel(near: mousePositionForUI, withContextText: textToShowInPanel)
+            }
         } else {
-            // This branch will now typically only be hit for hotkey trigger with no selection,
-            // or if there was an AX error. Mouse selections with empty text are returned early.
             RedEyeLogger.info("No text selected or error capturing. Not showing UI panel. (Trigger: \(triggerType))", category: "HotKeyManager")
         }
     }
 
-    // MARK: - InputMonitorManagerDelegate Implementation
     func mouseUpAfterPotentialSelection(at screenPoint: NSPoint) {
         RedEyeLogger.info("HotkeyManager received mouseUpAfterPotentialSelection at \(screenPoint)", category: "HotKeyManager")
         // Call the common text capture logic. The mousePositionForUI is the 'screenPoint' from the mouse up.
