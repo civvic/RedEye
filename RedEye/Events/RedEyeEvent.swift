@@ -5,7 +5,7 @@ import Foundation
 // Enum to define the type of event
 // Conforms to String for easier Codable representation if you want string values in JSON
 // Conforms to Codable to be part of RedEyeEvent's Codable conformance
-enum RedEyeEventType: String, Codable {
+enum RedEyeEventType: String, Codable, CaseIterable {
     case textSelection
     case applicationActivated
     case fileSystemEvent
