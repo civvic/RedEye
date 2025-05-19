@@ -27,23 +27,18 @@ private func keyboardEventTapCallback(proxy: CGEventTapProxy, type: CGEventType,
 }
 // --- End C Callback Function ---
 
-class KeyboardMonitorManager {
+class KeyboardMonitorManager: BaseMonitorManager {
 
-    private static let logCategory = "KeyboardMonitor"
-    private let eventBus: EventBus
-    var isEnabled: Bool = true
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     private var hasInputMonitoringPermission: Bool = false
 
-    init(eventBus: EventBus) {
-        self.eventBus = eventBus
-        RedEyeLogger.info("KeyboardMonitorManager initialized.", category: KeyboardMonitorManager.logCategory)
-    }
+    override var logCategory: String { "KeyboardMonitorManager" }
 
-    deinit {
-        stopMonitoring()
-        RedEyeLogger.info("KeyboardMonitorManager deinitialized.", category: KeyboardMonitorManager.logCategory)
+    init(eventBus: EventBus, configManager: ConfigurationManaging) {
+        self.hasInputMonitoringPermission = false
+        super.init(monitorType: .keyboardMonitorManager, eventBus: eventBus, configManager: configManager)
+        RedEyeLogger.info("KeyboardMonitorManager specific initialization complete.", category: logCategory)
     }
 
     /// Checks the current Input Monitoring permission status.
@@ -57,15 +52,15 @@ class KeyboardMonitorManager {
 
         if currentStatus {
             if !hasInputMonitoringPermission {
-                 RedEyeLogger.info("Input Monitoring permission already granted.", category: KeyboardMonitorManager.logCategory)
+                 RedEyeLogger.info("Input Monitoring permission already granted.", category: logCategory)
                  hasInputMonitoringPermission = true
             }
             return true
         } else {
             hasInputMonitoringPermission = false
-            RedEyeLogger.info("Input Monitoring permission not granted.", category: KeyboardMonitorManager.logCategory)
+            RedEyeLogger.info("Input Monitoring permission not granted.", category: logCategory)
             if promptIfNeeded {
-                RedEyeLogger.info("Requesting Input Monitoring permission from user...", category: KeyboardMonitorManager.logCategory)
+                RedEyeLogger.info("Requesting Input Monitoring permission from user...", category: logCategory)
                 // This will show the system prompt. It requires a Info.plist key NSInputMonitoringUsageDescription.
                 // It doesn't block; the user grants/denies asynchronously in System Settings.
                 // We check again next time the app starts or tries to monitor.
@@ -74,27 +69,23 @@ class KeyboardMonitorManager {
                 // We return false *now* because the user has to grant it manually.
                 // The app will likely need a restart, or we need more complex logic
                 // to re-check periodically after prompting. For now, we rely on restart.
-                RedEyeLogger.error("Input Monitoring permission must be granted in System Settings > Privacy & Security > Input Monitoring. Please grant access and restart RedEye if needed.", category: KeyboardMonitorManager.logCategory)
+                RedEyeLogger.error("Input Monitoring permission must be granted in System Settings > Privacy & Security > Input Monitoring. Please grant access and restart RedEye if needed.", category: logCategory)
             }
             return false
         }
     }
 
-    func startMonitoring() {
-        guard isEnabled else {
-            RedEyeLogger.info("Keyboard monitoring is disabled by toggle.", category: KeyboardMonitorManager.logCategory)
-            return
-        }
+    override func startMonitoring() -> Bool {
         guard eventTap == nil else {
-            RedEyeLogger.error("Attempted to start keyboard monitoring, but tap already exists.", category: KeyboardMonitorManager.logCategory)
-            return
+            RedEyeLogger.error("Attempted to start keyboard monitoring, but tap already exists.", category: logCategory)
+            return true
         }
 
-        RedEyeLogger.info("Attempting to start keyboard event monitoring...", category: KeyboardMonitorManager.logCategory)
+        RedEyeLogger.info("Attempting to start keyboard event monitoring...", category: logCategory)
 
         if !checkAndRequestInputMonitoringPermission(promptIfNeeded: !hasInputMonitoringPermission) {
-             RedEyeLogger.error("Cannot start keyboard monitoring due to lack of Input Monitoring permission.", category: KeyboardMonitorManager.logCategory)
-             return
+             RedEyeLogger.error("Cannot start keyboard monitoring due to lack of Input Monitoring permission.", category: logCategory)
+             return false
         }
         
         // Define the events we want to tap
@@ -119,59 +110,51 @@ class KeyboardMonitorManager {
 
         // Check if tap creation was successful
         guard let tap = eventTap else {
-            RedEyeLogger.error("Failed to create keyboard event tap (CGEvent.tapCreate returned nil). This might happen if permission was just granted and a restart is needed, or another issue occurred.", category: KeyboardMonitorManager.logCategory)
+            RedEyeLogger.error("Failed to create keyboard event tap (CGEvent.tapCreate returned nil). This might happen if permission was just granted and a restart is needed, or another issue occurred.", category: logCategory)
             // Reset permission flag to force re-check/prompt next time if needed
             hasInputMonitoringPermission = false // Assume permission might be the issue
-            return
+            return false
         }
 
         // Create a run loop source from the event tap
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
         guard let source = runLoopSource else {
-             RedEyeLogger.error("Failed to create run loop source from event tap.", category: KeyboardMonitorManager.logCategory)
+             RedEyeLogger.error("Failed to create run loop source from event tap.", category: logCategory)
              // Clean up the tap if source creation fails
              CFMachPortInvalidate(tap)
              // CFRelease(tap) // tapCreate follows the Create Rule, so we need to release. Handled in stopMonitoring/deinit now.
              eventTap = nil
-             return
+             return false
         }
 
         // Add the source to the current run loop
         CFRunLoopAddSource(CFRunLoopGetCurrent(), source, .commonModes)
         
-        RedEyeLogger.info("Keyboard event tap created and added to run loop.", category: KeyboardMonitorManager.logCategory)
+        RedEyeLogger.info("Keyboard event tap created and added to run loop.", category: logCategory)
+        return true // Successfully started
     }
 
-    func stopMonitoring() {
-        guard let tap = eventTap else { return }
-        RedEyeLogger.info("Stopping keyboard event monitoring...", category: KeyboardMonitorManager.logCategory)
+    override func stopMonitoring() {
+        guard let tap = eventTap else {
+            RedEyeLogger.debug("Attempted to stop KeyboardManager, but event tap was not active.", category: logCategory)
+            return
+        }
+        RedEyeLogger.info("Stopping keyboard event monitoring and releasing resources...", category: logCategory)
 
-        // Remove the source from the run loop first
         if let source = runLoopSource {
             CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
-            // CFRelease(source); // No release needed for CFRunLoopSource according to docs? Let ARC handle if possible. Check needed.
-            // Update: Docs suggest CFRunLoopSourceInvalidate implicitly releases. Let's rely on tap invalidation.
+            // CFRunLoopSourceInvalidate(source); // Invalidate might also release, docs are a bit sparse on CFRunLoopSource direct release.
             runLoopSource = nil
-            RedEyeLogger.debug("Removed run loop source.", category: KeyboardMonitorManager.logCategory)
-        } else {
-            RedEyeLogger.debug("No run loop source found to remove.", category: KeyboardMonitorManager.logCategory)
         }
-
-        // Invalidate the tap (this also disables the callback)
         CFMachPortInvalidate(tap)
-        // CFRelease(tap); // tapCreate follows Create Rule, must be released. Let ARC manage if Swift wrapper used, but direct CF calls need manual release.
-        // Let's ensure ARC doesn't interfere and manage CF manually where needed.
-        // However, since eventTap is CFMachPort?, ARC *should* handle the release when eventTap is set to nil.
-        // Let's rely on ARC for now unless we see leaks.
-        RedEyeLogger.debug("Invalidated event tap.", category: KeyboardMonitorManager.logCategory)
-
-        eventTap = nil // Let ARC release the CFMachPort object
-
-        RedEyeLogger.info("Keyboard event monitoring stopped and resources released.", category: KeyboardMonitorManager.logCategory)
+        // CFRelease(tap); // Let ARC handle via eventTap = nil
+        eventTap = nil
+        RedEyeLogger.info("Keyboard event monitoring stopped and resources released.", category: logCategory)
     }
     
     func handleEventTap(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent) -> Unmanaged<CGEvent>? {
-        
+        guard self.isCurrentlyActive else { return Unmanaged.passUnretained(event) } // Check base class active state
+
         // Filter out events we are not interested in
         guard type == .keyDown || type == .keyUp || type == .flagsChanged else {
             return Unmanaged.passUnretained(event) // Pass through
@@ -215,7 +198,7 @@ class KeyboardMonitorManager {
         default:
             // Should not happen due to guard, but good practice
             eventTypeString = "unknown"
-            RedEyeLogger.debug("Processing unexpected event type in switch: \(type.rawValue)", category: KeyboardMonitorManager.logCategory)
+            RedEyeLogger.debug("Processing unexpected event type in switch: \(type.rawValue)", category: logCategory)
             return Unmanaged.passUnretained(event) // Pass through
         }
         
@@ -233,13 +216,11 @@ class KeyboardMonitorManager {
         )
 
         // Emit the event via the eventBus
-        eventBus.publish(event: redEyeEvent)
+        self.eventBus?.publish(event: redEyeEvent)
 
         // Pass the event through unmodified
         return Unmanaged.passUnretained(event)
     }
-
-    // MARK: - Helper Functions
 
     /// Attempts to get the Unicode character produced by a keyDown/keyUp event,
     /// considering the current keyboard layout and modifier keys.

@@ -1,9 +1,4 @@
-//
-//  InputMonitorManager.swift
-//  RedEye
-//
-//  Created by Vicente Sosa on 5/11/25.
-//
+// RedEye/Managers/InputMonitorManager.swift
 
 import AppKit
 
@@ -12,7 +7,7 @@ protocol InputMonitorManagerDelegate: AnyObject {
     func mouseUpAfterPotentialSelection(at screenPoint: NSPoint)
 }
 
-class InputMonitorManager {
+class InputMonitorManager: BaseMonitorManager {
 
     weak var delegate: InputMonitorManagerDelegate?
 
@@ -28,28 +23,22 @@ class InputMonitorManager {
     private let dragThresholdDistanceSquared: CGFloat = 25.0 // (5 pixels)^2, distance mouse must move to be considered a drag
     private let clickMaxDuration: TimeInterval = 0.3 // Max duration for a click (seconds)
 
-    // MARK: - Developer Toggle <<< NEW
-    var isEnabled: Bool = true // Default to true, will be set by AppDelegate
+    override var logCategory: String { "InputMonitorManager" }
 
-    init() {
-        // Initialization, but monitors will be started explicitly
-        RedEyeLogger.info("InputMonitorManager initialized.", category: "InputMonitorManager")
+    init(configManager: ConfigurationManaging) {
+        super.init(monitorType: .inputMonitorManager, eventBus: nil, configManager: configManager)
+        RedEyeLogger.info("InputMonitorManager specific initialization complete.", category: logCategory)
     }
 
-    func startMonitoring() {
-        // Respect the isEnabled flag <<< MODIFIED
-        guard isEnabled else {
-            RedEyeLogger.info("InputMonitorManager monitoring is disabled by toggle.", category: "InputMonitorManager")
-            return
-        }
-
+    override func startMonitoring() -> Bool {
         guard mouseDownMonitor == nil, mouseUpMonitor == nil else {
-            RedEyeLogger.info("Monitors are already active.", category: "InputMonitorManager")
-            return
+            RedEyeLogger.info("Monitors are already active.", category: logCategory)
+            return true
         }
 
-        RedEyeLogger.info("Starting global mouse monitors.", category: "InputMonitorManager")
+        RedEyeLogger.info("Starting global mouse monitors.", category: logCategory)
 
+        var success = true
         // Monitor for leftMouseDown events globally
         mouseDownMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { [weak self] (event: NSEvent) in
             guard let self = self else { return }
@@ -57,6 +46,10 @@ class InputMonitorManager {
             self.isLeftMouseButtonDown = true
             self.mouseDownScreenPoint = NSEvent.mouseLocation // NSEvent.mouseLocation is already in screen coordinates
             self.mouseDownTimestamp = event.timestamp
+        }
+        if mouseDownMonitor == nil {
+            RedEyeLogger.error("Failed to set up global leftMouseDown monitor.", category: self.logCategory)
+            success = false
         }
 
         // Monitor for leftMouseUp events globally
@@ -72,7 +65,7 @@ class InputMonitorManager {
 
                 guard let downPoint = self.mouseDownScreenPoint, let downTimestamp = self.mouseDownTimestamp else {
                     // Should not happen if isLeftMouseButtonDown was true
-                    RedEyeLogger.error("Mouse up detected without prior mouse down info.", category: "InputMonitorManager")
+                    RedEyeLogger.error("Mouse up detected without prior mouse down info.", category: logCategory)
                     return
                 }
 
@@ -88,7 +81,7 @@ class InputMonitorManager {
                     // It's a click, so probably not a text selection drag. Do nothing for now.
                 } else {
                     // It's likely a drag (or a click that held longer than clickMaxDuration)
-                    RedEyeLogger.info("Potential selection drag finished (or long click). Duration: \(String(format: "%.3f", duration))s, DistanceSq: \(String(format: "%.1f", distanceSquared))", category: "InputMonitorManager")
+                    RedEyeLogger.info("Potential selection drag finished (or long click). Duration: \(String(format: "%.3f", duration))s, DistanceSq: \(String(format: "%.1f", distanceSquared))", category: logCategory)
                     // Notify the delegate that a potential selection might have occurred
                     self.delegate?.mouseUpAfterPotentialSelection(at: upScreenPoint)
                 }
@@ -98,6 +91,10 @@ class InputMonitorManager {
                 self.mouseDownTimestamp = nil
             }
         }
+        if mouseUpMonitor == nil {
+            RedEyeLogger.error("Failed to set up global leftMouseUp monitor.", category: self.logCategory)
+            success = false
+        }
 
         if mouseDownMonitor == nil || mouseUpMonitor == nil {
             RedEyeLogger.error("Failed to set up one or both global mouse monitors.", category: "InputMonitorManager")
@@ -106,29 +103,43 @@ class InputMonitorManager {
         } else {
             RedEyeLogger.info("Global mouse monitors successfully started.", category: "InputMonitorManager")
         }
+        if success {
+            RedEyeLogger.info("Global mouse monitors successfully started.", category: self.logCategory)
+            return true
+        } else {
+            RedEyeLogger.error("Failed to start one or both global mouse monitors. Cleaning up.", category: self.logCategory)
+            // Clean up any monitor that might have started if the other failed
+            if let monitor = mouseDownMonitor { NSEvent.removeMonitor(monitor); mouseDownMonitor = nil }
+            if let monitor = mouseUpMonitor { NSEvent.removeMonitor(monitor); mouseUpMonitor = nil }
+            return false
+        }
+
     }
 
-    func stopMonitoring() {
-        RedEyeLogger.info("Stopping global mouse monitors.", category: "InputMonitorManager")
+    override func stopMonitoring() {
+        var didStop = false
         if let monitor = mouseDownMonitor {
             NSEvent.removeMonitor(monitor)
             mouseDownMonitor = nil
-            RedEyeLogger.info("Global leftMouseDown monitor stopped.", category: "InputMonitorManager")
+            RedEyeLogger.info("Global leftMouseDown monitor stopped.", category: logCategory)
+            didStop = true
         }
         if let monitor = mouseUpMonitor {
             NSEvent.removeMonitor(monitor)
             mouseUpMonitor = nil
-            RedEyeLogger.info("Global leftMouseUp monitor stopped.", category: "InputMonitorManager")
+            RedEyeLogger.info("Global leftMouseUp monitor stopped.", category: logCategory)
+            didStop = true
+        }
+        
+        if didStop {
+            RedEyeLogger.info("InputMonitorManager mouse monitors stopped.", category: logCategory)
+        } else {
+            RedEyeLogger.debug("Attempted to stop InputMonitorManager, but no monitors were active.", category: logCategory)
         }
         
         // Clear state
         isLeftMouseButtonDown = false
         mouseDownScreenPoint = nil
         mouseDownTimestamp = nil
-    }
-
-    deinit {
-        stopMonitoring() // Ensure monitors are removed when the manager is deallocated
-        RedEyeLogger.info("InputMonitorManager deinitialized.", category: "InputMonitorManager")
     }
 }

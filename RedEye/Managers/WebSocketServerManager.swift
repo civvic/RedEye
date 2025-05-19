@@ -108,16 +108,30 @@ class WebSocketServerManager: EventBusSubscriber {
         RedEyeLogger.info("WebSocket client connected: \(clientID) from URI: \(requestHead.uri)", category: "WebSocketServerManager")
         self.connectedClients[clientID] = webSocket
 
-        webSocket.onText { [weak self] ws, text in // ws is WebSocketKit.WebSocket
-            guard let self = self else { return }
+        webSocket.onText { [weak self] ws, text in // Use 'ws' as provided by the closure
+            guard let self = self else { return } // Ensure self is valid
 
             RedEyeLogger.debug("Received text from client \(clientID): \(text)", category: WebSocketServerManager.logCategory)
             
-            // Delegate command handling to IPCCommandHandler <<< MODIFIED
-            // Offload to a new Task to ensure this NIO EventLoop callback returns quickly.
+            // The `ws` object (WebSocketKit.WebSocket) is an EventLoopBoundBox.
+            // Its methods (like send) are designed to be called from its event loop or
+            // will hop to it. We can call ws.send from within the Task.
             Task {
-                await self.ipcCommandHandler.handleRawCommand(text, from: clientID /*, webSocket: ws */)
-                // If handleRawCommand needed to send direct replies, we'd pass 'ws' (the WebSocket object)
+                let responseString = await self.ipcCommandHandler.handleRawCommand(text, from: clientID)
+                
+                if let response = responseString {
+                    RedEyeLogger.debug("Sending response to client \(clientID): \(response)", category: WebSocketServerManager.logCategory)
+                    do {
+                        try await ws.send(response)
+                    } catch {
+                        RedEyeLogger.error("Failed to send response to client \(clientID): \(error.localizedDescription)", category: WebSocketServerManager.logCategory, error: error)
+                        // Optionally, try to close the WebSocket if sending fails catastrophically,
+                        // or just log and let the connection continue if it's a transient issue.
+                        // Example: _ = ws.close(code: .unexpectedServerError)
+                    }
+                } else {
+                    RedEyeLogger.debug("IPCCommandHandler did not return a response string for client \(clientID) command: \(text)", category: WebSocketServerManager.logCategory)
+                }
             }
         }
         

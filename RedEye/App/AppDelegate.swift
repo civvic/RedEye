@@ -6,8 +6,10 @@ import ApplicationServices
 class AppDelegate: NSObject, NSApplicationDelegate {
     
     var statusItem: NSStatusItem?
+    // Core services/managers that don't depend on much else initially
     let eventBus: EventBus = MainEventBus()
-    let ipcCommandHandler: IPCCommandHandler = IPCCommandHandler()
+    var configurationManager: ConfigurationManaging?
+    var ipcCommandHandler: IPCCommandHandler?
 
     var pluginManager: PluginManager?
     var uiManager: UIManager?
@@ -24,47 +26,60 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         _ = self.checkAndRequestAccessibilityPermissions() // Result ignored for now
         
         // --- Manager Initialization Order ---
-        // Generally: Utils -> Core Logic -> Monitors/Servers -> UI-related
-        
-        // --- Manager Initialization ---
+        // 1. Configuration Manager (needed by other managers)
+        self.configurationManager = ConfigurationManager()
+        guard let configManager = self.configurationManager else {
+            RedEyeLogger.fault("CRITICAL: ConfigurationManager could not be initialized in AppDelegate. RedEye will not function correctly.", category: "AppDelegate")
+            // Consider a more graceful shutdown or error display if this happens.
+            // For now, app might continue but config-dependent features will fail.
+            // If ConfigurationManager's init itself can fatalError for critical issues, that's another approach.
+            return // Or NSApp.terminate(nil) if unrecoverable
+        }
+        RedEyeLogger.info("ConfigurationManager loaded/initialized.", category: "AppDelegate")
+
+        // 2. IPC Command Handler (depends on ConfigurationManager)
+        self.ipcCommandHandler = IPCCommandHandler(configManager: configManager) // << MODIFIED
+        guard let ipcHandler = self.ipcCommandHandler else {
+            fatalError("CRITICAL ERROR: IPCCommandHandler could not be initialized.")
+        }
+        RedEyeLogger.info("IPCCommandHandler initialized.", category: "AppDelegate")
+
+        // 3. Other Managers (Plugin, UI, Monitors, Servers)
         self.pluginManager = PluginManager()
+        self.webSocketServerManager = WebSocketServerManager(eventBus: self.eventBus, ipcCommandHandler: ipcHandler)
         
-        // WebSocketServerManager will now subscribe to the EventBus
-        self.webSocketServerManager = WebSocketServerManager(eventBus: self.eventBus, ipcCommandHandler: self.ipcCommandHandler)
-        
-        guard let pManager = self.pluginManager, let wsManager = self.webSocketServerManager else {
-            fatalError("CRITICAL ERROR: Core managers could not be initialized.")
+        guard let pManager = self.pluginManager, self.webSocketServerManager != nil else {
+            fatalError("CRITICAL ERROR: PluginManager or WebSocketServerManager could not be initialized.")
         }
 
         self.uiManager = UIManager(pluginManager: pManager)
-        guard let uiMgr = self.uiManager else { fatalError("CRITICAL ERROR: UIManager") }
+        guard let uiMgr = self.uiManager else { fatalError("CRITICAL ERROR: UIManager could not be initialized.") }
 
-        // Managers that previously used EventManager now get EventBus
-        self.hotkeyManager = HotkeyManager(eventBus: self.eventBus, uiManager: uiMgr)
+        // Initialize Monitor Managers (they now take configManager)
+        self.hotkeyManager = HotkeyManager(eventBus: self.eventBus, uiManager: uiMgr, configManager: configManager)
+        self.inputMonitorManager = InputMonitorManager(configManager: configManager) // Delegate set below
+        self.appActivationMonitor = AppActivationMonitor(eventBus: self.eventBus, configManager: configManager)
+        self.fsEventMonitorManager = FSEventMonitorManager(eventBus: self.eventBus, configManager: configManager)
+        self.keyboardMonitorManager = KeyboardMonitorManager(eventBus: self.eventBus, configManager: configManager)
         
-        self.inputMonitorManager = InputMonitorManager() // Delegate remains HotkeyManager
+        // Set delegates if needed (after both objects are initialized)
         self.inputMonitorManager?.delegate = self.hotkeyManager
         
-        self.appActivationMonitor = AppActivationMonitor(eventBus: self.eventBus)
-        self.fsEventMonitorManager = FSEventMonitorManager(eventBus: self.eventBus)
-        self.keyboardMonitorManager = KeyboardMonitorManager(eventBus: self.eventBus)
+        RedEyeLogger.info("All core managers initialized.", category: "AppDelegate")
 
-        // --- Default Monitor States ---
-        RedEyeLogger.info("Setting default monitor states (disabled). Modify in AppDelegate for testing.", category: "AppDelegate")
-        self.hotkeyManager?.isHotkeyUiEnabled = false  // Keeps ⌘⇧C text capture events active but suppresses the UI panel for the hotkey
-        self.inputMonitorManager?.isEnabled = false  // Disables mouse selection events AND its UI.
-        self.appActivationMonitor?.isEnabled = false
-        self.appActivationMonitor?.isEnabledBrowserURLCapture = false
-        self.fsEventMonitorManager?.isEnabled = false
-        self.keyboardMonitorManager?.isEnabled = true
-        
-        // --- Start Services (will respect isEnabled flags) ---
-        self.webSocketServerManager?.startServer()
-        self.inputMonitorManager?.startMonitoring()
-        self.appActivationMonitor?.startMonitoring()
-        self.fsEventMonitorManager?.startMonitoring()
-        self.keyboardMonitorManager?.startMonitoring()
-        
+        // --- Start Services ---
+        // Call the 'start()' method from BaseMonitorManager for monitor managers.
+        // Managers will internally check their 'isEnabled' status from config.
+        self.webSocketServerManager?.startServer() // This one is not a BaseMonitorManager subclass
+
+        self.hotkeyManager?.start()
+        self.inputMonitorManager?.start()
+        self.appActivationMonitor?.start()
+        self.fsEventMonitorManager?.start()
+        self.keyboardMonitorManager?.start()
+
+        RedEyeLogger.info("All services/monitors started (or attempted based on configuration).", category: "AppDelegate")
+
         // --- Status item setup code ---
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
@@ -74,35 +89,32 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit RedEye", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
         
-        RedEyeLogger.info("RedEye application finished launching. All managers initialized. Monitors started.", category: "AppDelegate")
+        RedEyeLogger.info("RedEye application finished launching. All managers initialized. Monitors started (or ready, based on config).", category: "AppDelegate")
         
-        // Enable verbose logging for DEBUG builds
 #if DEBUG
         RedEyeLogger.isVerboseLoggingEnabled = true
         print("RedEye Dev Note: Verbose debug logging is ENABLED (DEBUG build).")
 #else
         print("RedEye Info: Verbose debug logging is DISABLED (Release build).")
 #endif
-        
-        // Initial permission checks (Accessibility is checked above)
-        // Input Monitoring check/prompt happens inside KeyboardMonitorManager.startMonitoring()
-        // Future: Check other potential permissions here if needed (e.g., Full Disk Access if FSEvents configured broadly)
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
         RedEyeLogger.info("RedEye application will terminate. Stopping services...", category: "AppDelegate")
-        keyboardMonitorManager?.stopMonitoring()
-        fsEventMonitorManager?.stopMonitoring()
-        appActivationMonitor?.stopMonitoring()
-        inputMonitorManager?.stopMonitoring()
-        webSocketServerManager?.stopServer() // WSSM will unsubscribe from eventBus internally
+        // Call 'stop()' method from BaseMonitorManager for monitor managers.
+        self.keyboardMonitorManager?.stop()
+        self.fsEventMonitorManager?.stop()
+        self.appActivationMonitor?.stop()
+        self.inputMonitorManager?.stop()
+        self.hotkeyManager?.stop()
+        self.webSocketServerManager?.stopServer() // Not a BaseMonitorManager subclass
+        RedEyeLogger.info("All services/monitors stopped.", category: "AppDelegate")
     }
-    
+
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
         return true
     }
     
-    // Renamed for clarity, as it can prompt.
     @discardableResult // Allow ignoring return value
     func checkAndRequestAccessibilityPermissions() -> Bool {
         // Check status first without prompting

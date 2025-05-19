@@ -3,23 +3,18 @@
 import AppKit
 import Foundation // For NSAppleScript
 
-class AppActivationMonitor {
-
-    private let eventBus: EventBus
+class AppActivationMonitor: BaseMonitorManager {
     private var lastKnownActiveBundleID: String? // To avoid duplicate events if possible
     private var notificationObserver: NSObjectProtocol? // Store the observer to remove it correctly
 
-    var isEnabled: Bool = true // Default to true, will be set by AppDelegate
-
-    // MARK: - Browser URL Capture PoC (Safari) <<< NEW SECTION
-    var isEnabledBrowserURLCapture: Bool = false // Specific toggle for this PoC
     private let safariBundleID = "com.apple.Safari"
     private var appleScriptSafariURLTitle: NSAppleScript?
 
-    init(eventBus: EventBus) {
-        self.eventBus = eventBus
-        RedEyeLogger.info("AppActivationMonitor initialized.", category: "AppActivationMonitor")
-        
+    override var logCategory: String { "AppActivationMonitor" }
+
+    init(eventBus: EventBus, configManager: ConfigurationManaging) {
+        super.init(monitorType: .appActivationMonitor, eventBus: eventBus, configManager: configManager)
+
         // Pre-compile the AppleScript for Safari URL capture
         let scriptSource = """
         tell application "Safari"
@@ -39,85 +34,91 @@ class AppActivationMonitor {
         """
         self.appleScriptSafariURLTitle = NSAppleScript(source: scriptSource)
         if self.appleScriptSafariURLTitle == nil {
-            RedEyeLogger.error("Failed to initialize AppleScript for Safari URL capture.", category: "AppActivationMonitor")
+            RedEyeLogger.error("Failed to initialize AppleScript for Safari URL capture.", category: self.logCategory)
         }
+        RedEyeLogger.info("AppActivationMonitor specific initialization complete.", category: self.logCategory)
     }
 
-    func startMonitoring() {
-        guard isEnabled || isEnabledBrowserURLCapture else { // Also check browser capture flag
-            RedEyeLogger.info("AppActivation monitoring (and Safari URL PoC) is disabled by toggle(s).", category: "AppActivationMonitor")
-            return
-        }
-
+    override func startMonitoring() -> Bool {
         guard notificationObserver == nil else {
-             RedEyeLogger.info("AppActivation monitoring is already active.", category: "AppActivationMonitor")
-             return
+             RedEyeLogger.info("Monitoring is already active.", category: self.logCategory)
+            return true // Considered successfully "started" if already active
         }
 
-        RedEyeLogger.info("Starting application activation monitoring.", category: "AppActivationMonitor")
+        let browserURLCaptureEnabled = self.currentMonitorConfig?.parameters?["enableBrowserURLCapture"]?.boolValue() ?? false
+        if browserURLCaptureEnabled {
+            RedEyeLogger.info("Safari URL capture is ENABLED via configuration parameters.", category: self.logCategory)
+        } else {
+            RedEyeLogger.info("Safari URL capture is DISABLED via configuration parameters.", category: self.logCategory)
+        }
+
+        RedEyeLogger.info("Starting application activation NSWorkspace notifications.", category: self.logCategory)
         notificationObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didActivateApplicationNotification,
-            object: nil, // Observe for any application
-            queue: OperationQueue.main // Specify a queue, main is often suitable
+            object: nil,
+            queue: OperationQueue.main
         ) { [weak self] notification in
                 self?.handleAppActivation(notification)
         }
-    }
-
-    func stopMonitoring() {
-        if let observer = notificationObserver {
-            RedEyeLogger.info("Stopping application activation monitoring.", category: "AppActivationMonitor")
-            NSWorkspace.shared.notificationCenter.removeObserver(observer)
-            notificationObserver = nil
+        if notificationObserver != nil {
+            RedEyeLogger.info("Successfully started AppActivationMonitor.", category: self.logCategory)
+            return true
         } else {
-             RedEyeLogger.debug("Attempted to stop AppActivation monitoring, but it was not active.", category: "AppActivationMonitor")
+            RedEyeLogger.error("Failed to create NSWorkspace notification observer.", category: self.logCategory)
+            return false
         }
     }
 
-    deinit {
-        stopMonitoring()
-        RedEyeLogger.info("AppActivationMonitor deinitialized.", category: "AppActivationMonitor")
+    override func stopMonitoring() {
+        if let observer = notificationObserver {
+            RedEyeLogger.info("Stopping application activation NSWorkspace notifications.", category: self.logCategory)
+            NSWorkspace.shared.notificationCenter.removeObserver(observer)
+            notificationObserver = nil
+        } else {
+             RedEyeLogger.debug("Attempted to stop, but NSWorkspace observer was not active for AppActivationMonitor.", category: self.logCategory)
+        }
     }
 
     private func handleAppActivation(_ notification: Notification) {
+        guard self.isCurrentlyActive else {
+            RedEyeLogger.info("handleAppActivation called but monitor is not currently active.", category: logCategory)
+            return
+        }
+
         guard let activatedApp = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else {
-            // ... (existing error handling)
-            RedEyeLogger.error("Could not get NSRunningApplication from didActivateApplicationNotification.", category: "AppActivationMonitor")
+            RedEyeLogger.error("Could not get NSRunningApplication from didActivateApplicationNotification.", category: logCategory)
             return
         }
 
         guard let appName = activatedApp.localizedName, let bundleId = activatedApp.bundleIdentifier else {
-            // ... (existing error handling)
-            RedEyeLogger.error("Newly activated application is missing name or bundle ID. Name: \(activatedApp.localizedName ?? "N/A"), BundleID: \(activatedApp.bundleIdentifier ?? "N/A")", category: "AppActivationMonitor")
+            RedEyeLogger.error("Newly activated application is missing name or bundle ID. Name: \(activatedApp.localizedName ?? "N/A"), BundleID: \(activatedApp.bundleIdentifier ?? "N/A")", category: logCategory)
             return
         }
 
         // --- Standard App Activation Event (if enabled) ---
-        if self.isEnabled { // Check general toggle
-            if bundleId != lastKnownActiveBundleID { // Avoid duplicates
-                RedEyeLogger.info("Application activated: \(appName) (\(bundleId))", category: "AppActivationMonitor")
-                let event = RedEyeEvent(
-                    eventType: .applicationActivated,
-                    sourceApplicationName: appName,
-                    sourceBundleIdentifier: bundleId,
-                    metadata: ["pid": "\(activatedApp.processIdentifier)"]
-                )
-                eventBus.publish(event: event)
-            }
+        if bundleId != lastKnownActiveBundleID {
+            RedEyeLogger.info("Application activated: \(appName) (\(bundleId))", category: logCategory)
+            let event = RedEyeEvent(
+                eventType: .applicationActivated,
+                sourceApplicationName: appName,
+                sourceBundleIdentifier: bundleId,
+                metadata: ["pid": "\(activatedApp.processIdentifier)"]
+            )
+            self.eventBus?.publish(event: event)
         }
-        lastKnownActiveBundleID = bundleId // Update last known ID regardless of general toggle
+        lastKnownActiveBundleID = bundleId
 
         // --- Safari URL Capture PoC (if enabled and Safari is activated) ---
-        if self.isEnabledBrowserURLCapture && bundleId == safariBundleID {
-            RedEyeLogger.info("Safari activated, attempting to capture URL/Title (PoC).", category: "AppActivationMonitor")
+        let browserURLCaptureEnabled = self.currentMonitorConfig?.parameters?["enableBrowserURLCapture"]?.boolValue() ?? false
+        if browserURLCaptureEnabled && bundleId == safariBundleID {
+            RedEyeLogger.info("Safari activated, attempting to capture URL/Title (PoC as per config).", category: logCategory)
             executeSafariURLTitleScript(appName: appName, bundleId: bundleId)
         }
     }
 
-    // MARK: - Safari URL Capture Helper <<< NEW METHOD
     private func executeSafariURLTitleScript(appName: String, bundleId: String) {
         guard let script = self.appleScriptSafariURLTitle else {
-            RedEyeLogger.error("Safari URL AppleScript not compiled.", category: "AppActivationMonitor")
+            RedEyeLogger.error("Safari URL AppleScript not compiled.", category: logCategory)
             emitBrowserNavigationError(error: "AppleScript not compiled", appName: appName, bundleId: bundleId)
             return
         }
@@ -181,7 +182,7 @@ class AppActivationMonitor {
                     // contextText: pageTitle, // Or keep contextText nil and use metadata
                     metadata: metadata
                 )
-                self.eventBus.publish(event: event)
+                self.eventBus?.publish(event: event)
             }
         }
     }
@@ -197,6 +198,6 @@ class AppActivationMonitor {
             sourceBundleIdentifier: bundleId,
             metadata: metadata
         )
-        self.eventBus.publish(event: event)
+        self.eventBus?.publish(event: event)
     }
 }

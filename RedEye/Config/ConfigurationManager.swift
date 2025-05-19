@@ -37,7 +37,7 @@ protocol ConfigurationManaging: AnyObject {
     // Command to retrieve RedEye's current capabilities (available monitors, event types)
     // This might not solely rely on config, but config is a part of it.
     // For now, we can list monitor types from MonitorType.allCases and their config.
-    func getCapabilities() -> [String: Any] // Simplified return type for now
+    func getCapabilities() -> [String: JSONValue] // Simplified return type for now
 }
 
 class ConfigurationManager: ConfigurationManaging {
@@ -268,27 +268,45 @@ class ConfigurationManager: ConfigurationManaging {
     
     // MARK: - Introspection
     
-    func getCapabilities() -> [String : Any] {
+    func getCapabilities() -> [String : JSONValue] {
         return configQueue.sync {
-            let availableMonitors = MonitorType.allCases.map { monitorType -> [String: Any] in
+            let availableMonitorsArray = MonitorType.allCases.map { monitorType -> JSONValue in
                 let settings = self.currentConfig.monitorSettings[monitorType.rawValue]
-                return [
-                    "name": monitorType.rawValue,
-                    "isEnabledByDefaultInCurrentConfig": settings?.isEnabled ?? false, // Reflects current loaded config
-                    "configurableParameters": Self.describeParameters(for: monitorType)
+                let monitorDict: [String: JSONValue] = [
+                    "name": .string(monitorType.rawValue),
+                    "isEnabledByDefaultInCurrentConfig": .bool(settings?.isEnabled ?? false),
+                    "configurableParameters": .dictionary(Self.describeParametersAsJSONValue(for: monitorType))
                 ]
+                return .dictionary(monitorDict)
             }
             
+            let generalSettingsFieldsArray = [ // Manual description for now
+                "showPluginPanelOnHotkeyCapture: Bool"
+            ].map { JSONValue.string($0) }
+
             return [
-                "appName": self.appName,
-                "configSchemaVersion": self.currentConfig.schemaVersion,
-                "configFileLocation": self.configFileURL.path,
-                "availableEventMonitors": availableMonitors,
-                "availableEventTypes": RedEyeEventType.allCases.map { $0.rawValue }, // Assuming RedEyeEventType is CaseIterable
-                "generalSettingsFields": [
-                    "showPluginPanelOnHotkeyCapture: Bool"
-                ]
+                "appName": .string(self.appName),
+                "configSchemaVersion": .string(self.currentConfig.schemaVersion),
+                "configFileLocation": .string(self.configFileURL.path),
+                "availableEventMonitors": .array(availableMonitorsArray),
+                "availableEventTypes": .array(RedEyeEventType.allCases.map { .string($0.rawValue) }),
+                "generalSettingsFields": .array(generalSettingsFieldsArray)
             ]
+        }
+    }
+
+    // Helper for getCapabilities to describe parameters as [String: JSONValue]
+    // << MODIFIED: Returns [String: JSONValue] >>
+    private static func describeParametersAsJSONValue(for monitorType: MonitorType) -> [String: JSONValue] {
+        switch monitorType {
+        case .fsEventMonitorManager:
+            return ["paths": .string("[String] (e.g., [\"~/Documents\", \"/tmp\"])")]
+        case .appActivationMonitor:
+            return ["enableBrowserURLCapture": .string("Bool (for Safari URL PoC)")]
+        case .keyboardMonitorManager:
+            return ["exampleDebounceInterval": .string("Double (seconds, hypothetical example)")]
+        default:
+            return ["note": .string("No specific parameters defined for this monitor type yet.")]
         }
     }
 
