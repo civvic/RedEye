@@ -6,81 +6,23 @@ import ApplicationServices
 class AppDelegate: NSObject, NSApplicationDelegate {
     
     var statusItem: NSStatusItem?
-    // Core services/managers that don't depend on much else initially
-    let eventBus: EventBus = MainEventBus()
-    var configurationManager: ConfigurationManaging?
-    var ipcCommandHandler: IPCCommandHandler?
-
-    var pluginManager: PluginManager?
-    var uiManager: UIManager?
-    var webSocketServerManager: WebSocketServerManager?
-    
-    // Event emitting managers:
-    var hotkeyManager: HotkeyManager?
-    var inputMonitorManager: InputMonitorManager?
-    var appActivationMonitor: AppActivationMonitor?
-    var fsEventMonitorManager: FSEventMonitorManager?
-    var keyboardMonitorManager: KeyboardMonitorManager?
+    private var appCoordinator: AppCoordinator?
 
     func applicationDidFinishLaunching(_ aNotification: Notification) {
-        _ = self.checkAndRequestAccessibilityPermissions() // Result ignored for now
+        RedEyeLogger.info("Application starting up...", category: "AppDelegate")
+
+        // 1. Perform initial critical checks like permissions
+        _ = self.checkAndRequestAccessibilityPermissions()
         
-        // --- Manager Initialization Order ---
-        // 1. Configuration Manager (needed by other managers)
-        self.configurationManager = ConfigurationManager()
-        guard let configManager = self.configurationManager else {
-            RedEyeLogger.fault("CRITICAL: ConfigurationManager could not be initialized in AppDelegate. RedEye will not function correctly.", category: "AppDelegate")
-            // Consider a more graceful shutdown or error display if this happens.
-            // For now, app might continue but config-dependent features will fail.
-            // If ConfigurationManager's init itself can fatalError for critical issues, that's another approach.
-            return // Or NSApp.terminate(nil) if unrecoverable
-        }
-        RedEyeLogger.info("ConfigurationManager loaded/initialized.", category: "AppDelegate")
-
-        // 2. IPC Command Handler (depends on ConfigurationManager)
-        self.ipcCommandHandler = IPCCommandHandler(configManager: configManager) // << MODIFIED
-        guard let ipcHandler = self.ipcCommandHandler else {
-            fatalError("CRITICAL ERROR: IPCCommandHandler could not be initialized.")
-        }
-        RedEyeLogger.info("IPCCommandHandler initialized.", category: "AppDelegate")
-
-        // 3. Other Managers (Plugin, UI, Monitors, Servers)
-        self.pluginManager = PluginManager()
-        self.webSocketServerManager = WebSocketServerManager(eventBus: self.eventBus, ipcCommandHandler: ipcHandler)
+        // 2. Initialize and start the AppCoordinator
+        // This coordinator will now handle the setup of all core services and managers.
+        RedEyeLogger.info("Initializing AppCoordinator...", category: "AppDelegate")
+        self.appCoordinator = AppCoordinator()
         
-        guard let pManager = self.pluginManager, self.webSocketServerManager != nil else {
-            fatalError("CRITICAL ERROR: PluginManager or WebSocketServerManager could not be initialized.")
-        }
-
-        self.uiManager = UIManager(pluginManager: pManager)
-        guard let uiMgr = self.uiManager else { fatalError("CRITICAL ERROR: UIManager could not be initialized.") }
-
-        // Initialize Monitor Managers (they now take configManager)
-        self.hotkeyManager = HotkeyManager(eventBus: self.eventBus, uiManager: uiMgr, configManager: configManager)
-        self.inputMonitorManager = InputMonitorManager(configManager: configManager) // Delegate set below
-        self.appActivationMonitor = AppActivationMonitor(eventBus: self.eventBus, configManager: configManager)
-        self.fsEventMonitorManager = FSEventMonitorManager(eventBus: self.eventBus, configManager: configManager)
-        self.keyboardMonitorManager = KeyboardMonitorManager(eventBus: self.eventBus, configManager: configManager)
+        RedEyeLogger.info("Starting services via AppCoordinator...", category: "AppDelegate")
+        self.appCoordinator?.start() // AppCoordinator.start() now calls start on all managers
         
-        // Set delegates if needed (after both objects are initialized)
-        self.inputMonitorManager?.delegate = self.hotkeyManager
-        
-        RedEyeLogger.info("All core managers initialized.", category: "AppDelegate")
-
-        // --- Start Services ---
-        // Call the 'start()' method from BaseMonitorManager for monitor managers.
-        // Managers will internally check their 'isEnabled' status from config.
-        self.webSocketServerManager?.startServer() // This one is not a BaseMonitorManager subclass
-
-        self.hotkeyManager?.start()
-        self.inputMonitorManager?.start()
-        self.appActivationMonitor?.start()
-        self.fsEventMonitorManager?.start()
-        self.keyboardMonitorManager?.start()
-
-        RedEyeLogger.info("All services/monitors started (or attempted based on configuration).", category: "AppDelegate")
-
-        // --- Status item setup code ---
+        // 3. Setup UI elements like the status bar menu (remains in AppDelegate)
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = statusItem?.button {
             button.image = NSImage(systemSymbolName: "eye.fill", accessibilityDescription: "RedEye")
@@ -89,26 +31,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem(title: "Quit RedEye", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem?.menu = menu
         
-        RedEyeLogger.info("RedEye application finished launching. All managers initialized. Monitors started (or ready, based on config).", category: "AppDelegate")
+        RedEyeLogger.info("RedEye application finished launching. AppDelegate setup complete.", category: "AppDelegate")
         
-#if DEBUG
-        RedEyeLogger.isVerboseLoggingEnabled = true
-        print("RedEye Dev Note: Verbose debug logging is ENABLED (DEBUG build).")
-#else
-        print("RedEye Info: Verbose debug logging is DISABLED (Release build).")
-#endif
+        // Global debug logging toggle (can stay here or move to AppCoordinator if preferred)
+        #if DEBUG
+            RedEyeLogger.isVerboseLoggingEnabled = true
+            print("RedEye Dev Note: Verbose debug logging is ENABLED (DEBUG build).")
+        #else
+            print("RedEye Info: Verbose debug logging is DISABLED (Release build).")
+        #endif
     }
     
     func applicationWillTerminate(_ aNotification: Notification) {
-        RedEyeLogger.info("RedEye application will terminate. Stopping services...", category: "AppDelegate")
-        // Call 'stop()' method from BaseMonitorManager for monitor managers.
-        self.keyboardMonitorManager?.stop()
-        self.fsEventMonitorManager?.stop()
-        self.appActivationMonitor?.stop()
-        self.inputMonitorManager?.stop()
-        self.hotkeyManager?.stop()
-        self.webSocketServerManager?.stopServer() // Not a BaseMonitorManager subclass
-        RedEyeLogger.info("All services/monitors stopped.", category: "AppDelegate")
+        RedEyeLogger.info("Application will terminate. Instructing AppCoordinator to stop services...", category: "AppDelegate")
+        // Delegate stopping services to the AppCoordinator
+        self.appCoordinator?.stop()
+        RedEyeLogger.info("AppCoordinator finished stopping services.", category: "AppDelegate")
     }
 
     func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool {
