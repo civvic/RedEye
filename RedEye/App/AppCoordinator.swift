@@ -16,6 +16,8 @@ class AppCoordinator {
     let uiManager: UIManager // UIManager might need access to other managers or coordinators later
     let webSocketServerManager: WebSocketServerManager
     
+    let textCaptureService: TextCaptureService
+
     // Event emitting managers (BaseMonitorManager subclasses)
     let hotkeyManager: HotkeyManager
     let inputMonitorManager: InputMonitorManager
@@ -35,6 +37,8 @@ class AppCoordinator {
         // IPCCommandHandler depends on ConfigurationManager
         self.ipcCommandHandler = IPCCommandHandler(configManager: self.configurationManager)
         
+        self.textCaptureService = TextCaptureService() // << Create TextCaptureService instance
+
         // --- Initialize Other Managers ---
         self.pluginManager = PluginManager()
         
@@ -50,9 +54,10 @@ class AppCoordinator {
         self.hotkeyManager = HotkeyManager(
             eventBus: self.eventBus,
             uiManager: self.uiManager,
-            configManager: self.configurationManager
+            configManager: self.configurationManager,
+            textCaptureService: self.textCaptureService // Pass the service
         )
-        
+
         self.inputMonitorManager = InputMonitorManager(configManager: self.configurationManager)
         // Delegate setup: InputMonitorManager's delegate is HotkeyManager
         self.inputMonitorManager.delegate = self.hotkeyManager
