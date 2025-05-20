@@ -274,7 +274,7 @@ class MainEventBusTests: XCTestCase {
 //        RedEyeLogger.debug("TEST: testWeakReferenceOfSubscriber - START", category: "MainEventBusTests")
         // 1. Arrange
         var deallocatableSubscriber: MockEventBusSubscriber? = MockEventBusSubscriber(id: UUID(), expectation: nil)
-        let deallocatableSubscriberID = deallocatableSubscriber!.id // For logging
+//        let deallocatableSubscriberID = deallocatableSubscriber!.id // For logging
 
         // A persistent subscriber to ensure the bus still works
         let persistentSubscriberExpectation = XCTestExpectation(description: "Persistent subscriber should receive event after other is deallocated")

@@ -125,4 +125,10 @@ enum JSONValue: Codable {
         if case .array(let a) = self { return a }
         return nil
     }
+    
+    func intValue() -> Int? {
+        if case .int(let i) = self { return i }
+        // Optional: could try to parse from string if case .string(let s) = self { return Int(s) }
+        return nil
+    }
 }

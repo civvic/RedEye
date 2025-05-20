@@ -46,75 +46,79 @@ class ConfigurationManager: ConfigurationManaging {
     private let appName = "RedEye" // Or Bundle.main.infoDictionary?[kCFBundleNameKey as String] as? String ?? "RedEye"
     private let configFileName = "config.json"
     
-    private var currentConfig: RedEyeConfig
     private let configFileURL: URL
+    private let encoder: JSONEncoder
+    private let decoder: JSONDecoder
+    private var currentConfig: RedEyeConfig
 
     // Queue for serializing access to currentConfig and file operations
     private let configQueue = DispatchQueue(label: "com.vic.RedEye.ConfigurationManagerQueue", qos: .utility)
 
-    // JSON Coders
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
+    // MARK: - Designated Initializer
+    // This is the single designated initializer. All other inits must call this.
+    private init(determinedConfigFileURL: URL) {
+        self.configFileURL = determinedConfigFileURL
 
-    // MARK: - Initialization
-    init() {
-        // Determine config file URL (e.g., in Application Support)
-        guard let appSupportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
-            RedEyeLogger.fault("CRITICAL: Could not find Application Support directory. Configuration system will not work.", category: ConfigurationManager.logCategory)
-            // This is a non-recoverable state for the config manager.
-            // We'll use a dummy config, but saving/loading will be impossible.
-            self.configFileURL = URL(fileURLWithPath: "/dev/null/redeye_config.json") // Invalid path
-            self.currentConfig = RedEyeConfig.defaultConfig() // In-memory default
-            self.encoder = JSONEncoder() // Still need to init these
-            self.decoder = JSONDecoder()
-            RedEyeLogger.error("ConfigurationManager will operate with in-memory defaults only. No persistence.", category: ConfigurationManager.logCategory)
-            return
-        }
-
-        let redEyeAppSupportDir = appSupportDir.appendingPathComponent(self.appName, isDirectory: true)
-        self.configFileURL = redEyeAppSupportDir.appendingPathComponent(self.configFileName)
-        
         self.encoder = JSONEncoder()
-        self.encoder.outputFormatting = [.prettyPrinted, .sortedKeys] // Make JSON human-readable
-        self.encoder.dateEncodingStrategy = .iso8601 // Consistent date handling
+        self.encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        self.encoder.dateEncodingStrategy = .iso8601
 
         self.decoder = JSONDecoder()
-        self.decoder.dateDecodingStrategy = .iso8601
+        self.decoder.dateDecodingStrategy = .iso8601 // Corrected
 
-        // Initial load or default creation.
-        // This needs to be synchronous for init, or init needs to be throwable/async.
-        // For now, load synchronously. If load fails, use defaults and attempt to save them.
-        // This logic will be fleshed out in the implementation part.
+        // Now, initialize currentConfig by loading or using defaults.
+        // This logic is moved directly into the designated initializer.
+        let logInitCategory = "\(ConfigurationManager.logCategory).designatedInit"
         do {
-            // Ensure the directory exists before trying to load/save.
-            // This is done within performSaveConfiguration if the file is being created.
-            // For loading, if the directory doesn't exist, the file won't exist.
-            RedEyeLogger.info("Attempting to load configuration from: \(self.configFileURL.path)", category: ConfigurationManager.logCategory)
-            let loadedConfig = try Self.performLoadConfiguration(
-                url: self.configFileURL,
-                decoder: self.decoder
-            )
+            RedEyeLogger.info("Attempting to load configuration from: \(self.configFileURL.path)", category: logInitCategory)
+            // Pass self.decoder directly now.
+            let loadedConfig = try Self.performLoadConfiguration(url: self.configFileURL, decoder: self.decoder)
             self.currentConfig = loadedConfig
-            RedEyeLogger.info("Configuration loaded successfully. Schema version: \(self.currentConfig.schemaVersion)", category: ConfigurationManager.logCategory)
-            // Optional: Perform schema version check and migration if needed in the future.
+            RedEyeLogger.info("Configuration loaded successfully. Schema version: \(self.currentConfig.schemaVersion)", category: logInitCategory)
         } catch {
-            RedEyeLogger.info("Failed to load configuration (Reason: \(error.localizedDescription)). Using default configuration and attempting to save.", category: ConfigurationManager.logCategory)
-            self.currentConfig = RedEyeConfig.defaultConfig()
+            RedEyeLogger.info("Failed to load configuration from \(self.configFileURL.path) (Reason: \(error.localizedDescription)). Using default config and attempting to save.", category: logInitCategory)
+            self.currentConfig = RedEyeConfig.defaultConfig() // Initialize currentConfig
             do {
-                RedEyeLogger.info("Attempting to save default configuration to: \(self.configFileURL.path)", category: ConfigurationManager.logCategory)
-                try Self.performSaveConfiguration(
-                    config: self.currentConfig,
-                    url: self.configFileURL,
-                    encoder: self.encoder,
-                    appName: self.appName // Pass appName for directory creation
-                )
-                RedEyeLogger.info("Default configuration saved successfully.", category: ConfigurationManager.logCategory)
+                // Pass self.encoder and self.appName directly.
+                try Self.performSaveConfiguration(config: self.currentConfig, url: self.configFileURL, encoder: self.encoder, appName: self.appName)
+                RedEyeLogger.info("Default configuration saved to \(self.configFileURL.path)", category: logInitCategory)
             } catch let saveError {
-                RedEyeLogger.error("CRITICAL: Failed to save default configuration (Reason: \(saveError.localizedDescription)). Configuration might not persist.", category: ConfigurationManager.logCategory, error: saveError)
+                RedEyeLogger.error("CRITICAL: Failed to save default configuration to \(self.configFileURL.path) (Reason: \(saveError.localizedDescription)). Config might not persist.", category: logInitCategory, error: saveError)
             }
         }
-        RedEyeLogger.info("ConfigurationManager initialized.", category: ConfigurationManager.logCategory)
+        RedEyeLogger.info("ConfigurationManager designated initialization complete. Effective schema: \(self.currentConfig.schemaVersion)", category: logInitCategory)
     }
+
+    // MARK: - Public Convenience Initializer
+    convenience init() {
+        let logAppSupportCategory = "\(ConfigurationManager.logCategory).appSupportInit"
+        let appNameForPath = "RedEye" // Use static or local constant for path generation
+        let configFileNameForPath = "config.json"
+        let calculatedURL: URL
+
+        if let appSupportDir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first {
+            let redEyeAppSupportDir = appSupportDir.appendingPathComponent(appNameForPath, isDirectory: true)
+            calculatedURL = redEyeAppSupportDir.appendingPathComponent(configFileNameForPath)
+        } else {
+            RedEyeLogger.fault("CRITICAL: Could not find Application Support directory. Defaulting to temporary config path.", category: logAppSupportCategory)
+            calculatedURL = FileManager.default.temporaryDirectory
+                .appendingPathComponent(appNameForPath)
+                .appendingPathComponent(configFileNameForPath)
+            RedEyeLogger.error("RedEye will use a temporary configuration path: \(calculatedURL.path). Settings will not persist across launches.", category: logAppSupportCategory)
+        }
+        
+        self.init(determinedConfigFileURL: calculatedURL) // Call the designated initializer
+        RedEyeLogger.info("ConfigurationManager public convenience initialization complete.", category: logAppSupportCategory)
+    }
+
+    // MARK: - Internal Convenience Initializer for Testing
+    #if DEBUG // Or a specific TESTING build flag
+    internal convenience init(testingConfigFileURL: URL) {
+        self.init(determinedConfigFileURL: testingConfigFileURL)
+        RedEyeLogger.info("Initialized ConfigurationManager with TESTING URL: \(testingConfigFileURL.path)", category: "\(ConfigurationManager.logCategory).testingInit")
+    }
+    #endif
+
 
     // MARK: - Static File Operations
     
