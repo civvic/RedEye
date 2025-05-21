@@ -2,6 +2,7 @@
 
 import Foundation
 import AppKit // For NSWorkspace, AXUIElement related constants
+import os
 
 // To provide more context than just the string, or detailed errors
 struct TextCaptureResult {
@@ -52,19 +53,20 @@ enum TextCaptureError: Error, LocalizedError {
     }
 }
 
-class TextCaptureService {
+class TextCaptureService: Loggable {
 
-    private static let logCategory = "TextCaptureService"
+    var logCategoryForInstance: String { return "TextCaptureService" }
+    var instanceLogger: Logger { Logger(subsystem: RedEyeLogger.subsystem, category: self.logCategoryForInstance) }
 
     init() {
-        RedEyeLogger.info("TextCaptureService initialized.", category: TextCaptureService.logCategory)
+        info("TextCaptureService initialized.")
     }
 
     /// Attempts to capture the currently selected text from the frontmost application.
     /// - Returns: A `TextCaptureResult` containing the text, application info, and any error.
     func captureSelectedTextFromFrontmostApp() -> TextCaptureResult {
         guard let frontmostApp = NSWorkspace.shared.frontmostApplication else {
-            RedEyeLogger.error("Could not determine frontmost application.", category: TextCaptureService.logCategory)
+            error("Could not determine frontmost application.")
             return TextCaptureResult(capturedText: nil, sourceApplicationName: nil, sourceBundleIdentifier: nil, error: .noFrontmostApplication)
         }
 
@@ -72,7 +74,7 @@ class TextCaptureService {
         let appName = frontmostApp.localizedName
         let bundleId = frontmostApp.bundleIdentifier
         
-        RedEyeLogger.debug("Attempting text capture from: \(appName ?? "Unknown App") (\(bundleId ?? "Unknown BundleID"))", category: TextCaptureService.logCategory)
+        debug("Attempting text capture from: \(appName ?? "Unknown App") (\(bundleId ?? "Unknown BundleID"))")
 
         let appElement = AXUIElementCreateApplication(pid)
         var focusedUIElementAsAnyObject: AnyObject? // Store the AnyObject? from the API
@@ -80,13 +82,13 @@ class TextCaptureService {
         let focusCopyError = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedUIElementAsAnyObject)
 
         if focusCopyError != .success {
-            RedEyeLogger.error("Error getting focused UI element: \(TextCaptureError.stringForAXErrorCode(focusCopyError))", category: TextCaptureService.logCategory)
+            error("Error getting focused UI element: \(TextCaptureError.stringForAXErrorCode(focusCopyError))")
             return TextCaptureResult(capturedText: nil, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, error: .accessibilityError(code: focusCopyError, operation: "CopyFocusedUIElement"))
         }
         
         guard let focusedElement = focusedUIElementAsAnyObject else {
             // This means AXAPI returned success but the out-parameter is nil. Highly unlikely but possible.
-            RedEyeLogger.error("Focused UI element reference was nil despite AXAPI success for CopyFocusedUIElement.", category: TextCaptureService.logCategory)
+            error("Focused UI element reference was nil despite AXAPI success for CopyFocusedUIElement.")
             return TextCaptureResult(capturedText: nil, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, error: .focusedElementUnavailable("Focused UI element reference was nil."))
         }
 
@@ -101,18 +103,18 @@ class TextCaptureService {
 
         if selectedTextCopyError == .success {
             if let capturedText = selectedTextValue as? String, !capturedText.isEmpty {
-                RedEyeLogger.info("Successfully captured text (first 100 chars): \"\(capturedText.prefix(100))\"", category: TextCaptureService.logCategory)
+                info("Successfully captured text (first 100 chars): \"\(capturedText.prefix(100))\"")
                 return TextCaptureResult(capturedText: capturedText, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, error: nil)
             } else {
-                RedEyeLogger.info("Successfully queried for selected text, but no text is selected or selection is empty.", category: TextCaptureService.logCategory)
+                info("Successfully queried for selected text, but no text is selected or selection is empty.")
                 return TextCaptureResult(capturedText: nil, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, error: .noTextSelected)
             }
         } else {
             if selectedTextCopyError == .attributeUnsupported {
-                 RedEyeLogger.info("Focused element in \(appName ?? "target app") does not support kAXSelectedTextAttribute.", category: TextCaptureService.logCategory)
+                 info("Focused element in \(appName ?? "target app") does not support kAXSelectedTextAttribute.")
                  return TextCaptureResult(capturedText: nil, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, error: .accessibilityError(code: selectedTextCopyError, operation: "CopySelectedText (AttributeUnsupported)"))
             } else {
-                RedEyeLogger.error("Error getting selected text value: \(TextCaptureError.stringForAXErrorCode(selectedTextCopyError))", category: TextCaptureService.logCategory)
+                error("Error getting selected text value: \(TextCaptureError.stringForAXErrorCode(selectedTextCopyError))")
                 return TextCaptureResult(capturedText: nil, sourceApplicationName: appName, sourceBundleIdentifier: bundleId, error: .accessibilityError(code: selectedTextCopyError, operation: "CopySelectedText"))
             }
         }

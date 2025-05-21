@@ -40,7 +40,7 @@ class FSEventMonitorManager: BaseMonitorManager {
     private var dispatchQueue: DispatchQueue // Use a dispatch queue instead of RunLoop
     private var callbackContext: FSEventStreamContext
     
-    override var logCategory: String { "FSEventMonitorManager" }
+    override var logCategoryForInstance: String { "FSEventMonitorManager" }
 
     init(eventBus: EventBus, configManager: ConfigurationManaging, queueLabel: String = "com.vic.RedEye.FSEventMonitorQueue") {
         // Store specific dependencies before super.init if needed by base, or pass them up.
@@ -51,7 +51,7 @@ class FSEventMonitorManager: BaseMonitorManager {
         super.init(monitorType: .fsEventMonitorManager, eventBus: eventBus, configManager: configManager)
         
         self.callbackContext.info = Unmanaged.passUnretained(self).toOpaque()
-        RedEyeLogger.info("FSEventMonitorManager specific initialization complete.", category: self.logCategory)
+        info("FSEventMonitorManager specific initialization complete.")
     }
 
     private func internalDefaultPaths() -> [String] {
@@ -60,7 +60,7 @@ class FSEventMonitorManager: BaseMonitorManager {
             FileManager.default.urls(for: dir, in: .userDomainMask).first?.path
         }
         if paths.count != defaultDirs.count {
-             RedEyeLogger.error("Could not resolve all internal default paths (Documents, Downloads).", category: self.logCategory)
+             error("Could not resolve all internal default paths (Documents, Downloads).")
         }
         return paths
     }
@@ -68,7 +68,7 @@ class FSEventMonitorManager: BaseMonitorManager {
     override func startMonitoring() -> Bool {
         guard streamRef == nil else {
             // Use .error as this indicates unexpected state / logic error
-            RedEyeLogger.error("Attempted to start monitoring, but stream already exists.", category: logCategory)
+            error("Attempted to start monitoring, but stream already exists.")
             return true
         }
         
@@ -76,23 +76,23 @@ class FSEventMonitorManager: BaseMonitorManager {
         // Path retrieval logic using currentMonitorConfig.parameters and internalDefaultPaths()
         if let pathsFromConfig = currentMonitorConfig?.parameters?["paths"]?.arrayValue()?.compactMap({ $0.stringValue() }) {
             if pathsFromConfig.isEmpty {
-                RedEyeLogger.info("'paths' parameter is empty in config. Using internal default paths.", category: logCategory)
+                info("'paths' parameter is empty in config. Using internal default paths.")
                 pathsToWatchEffective = internalDefaultPaths()
             } else {
-                RedEyeLogger.info("Using 'paths' from configuration: \(pathsFromConfig)", category: logCategory)
+                info("Using 'paths' from configuration: \(pathsFromConfig)")
                 pathsToWatchEffective = pathsFromConfig.map { NSString(string: $0).expandingTildeInPath }
             }
         } else {
-            RedEyeLogger.info("'paths' parameter not found or invalid in config. Using internal default paths.", category: logCategory)
+            info("'paths' parameter not found or invalid in config. Using internal default paths.")
             pathsToWatchEffective = internalDefaultPaths()
         }
 
         guard !pathsToWatchEffective.isEmpty else {
-             RedEyeLogger.error("Attempted to start monitoring, but no paths are configured or resolved.", category: logCategory)
+             error("Attempted to start monitoring, but no paths are configured or resolved.")
              return false
          }
 
-        RedEyeLogger.info("Attempting to start FSEvent monitoring for paths: \(pathsToWatchEffective)... (as configured)", category: logCategory)
+        info("Attempting to start FSEvent monitoring for paths: \(pathsToWatchEffective)... (as configured)")
 
         // Define combined flags explicitly as FSEventStreamCreateFlags
         let streamFlags = FSEventStreamCreateFlags(
@@ -114,42 +114,42 @@ class FSEventMonitorManager: BaseMonitorManager {
         if let stream = streamRef {
             FSEventStreamSetDispatchQueue(stream, self.dispatchQueue)
             if FSEventStreamStart(stream) {
-                RedEyeLogger.info("FSEvent stream started successfully on \(self.dispatchQueue.label). Watching: \(pathsToWatchEffective)", category: self.logCategory)
+                info("FSEvent stream started successfully on \(self.dispatchQueue.label). Watching: \(pathsToWatchEffective)")
                 return true // Successfully started
             } else {
-                RedEyeLogger.error("Failed to start FSEvent stream.", category: self.logCategory)
+                error("Failed to start FSEvent stream.")
                 FSEventStreamInvalidate(stream)
                 FSEventStreamRelease(stream)
                 streamRef = nil
                 return false // Failed to start
             }
         } else {
-            RedEyeLogger.error("Failed to create FSEvent stream (FSEventStreamCreate returned nil).", category: self.logCategory)
+            error("Failed to create FSEvent stream (FSEventStreamCreate returned nil).")
             return false // Failed to create stream
         }
     }
 
     override func stopMonitoring() {
         guard let stream = streamRef else {
-            RedEyeLogger.debug("Attempted to stop FSEvents, but stream was not active.", category: self.logCategory)
+            debug("Attempted to stop FSEvents, but stream was not active.")
             return
         }
-        RedEyeLogger.info("Stopping FSEvent monitoring stream...", category: self.logCategory)
+        info("Stopping FSEvent monitoring stream...")
         FSEventStreamStop(stream)
         FSEventStreamInvalidate(stream)
         FSEventStreamRelease(stream)
         streamRef = nil
-        RedEyeLogger.info("FSEvent monitoring stream stopped and released.", category: self.logCategory)
+        info("FSEvent monitoring stream stopped and released.")
     }
 
     fileprivate func handleFSEvents(numEvents: Int, eventPaths: UnsafeRawPointer, eventFlags: UnsafePointer<FSEventStreamEventFlags>, eventIds: UnsafePointer<FSEventStreamEventId>) {
         guard self.isCurrentlyActive else { return } // Check base class active state
         guard let paths = Unmanaged<CFArray>.fromOpaque(eventPaths).takeUnretainedValue() as? [String] else {
-            RedEyeLogger.error("Could not cast eventPaths CFArray to [String].", category: logCategory)
+            error("Could not cast eventPaths CFArray to [String].")
             return
         }
 
-        RedEyeLogger.debug("Received \(numEvents) raw FSEvents.", category: logCategory)
+        debug("Received \(numEvents) raw FSEvents.")
 
         for i in 0..<numEvents {
             let path = paths[i]
@@ -157,13 +157,13 @@ class FSEventMonitorManager: BaseMonitorManager {
             let eventId = eventIds[i]
             let flagsDict = interpretFSEventFlags(flags)
 
-            RedEyeLogger.info("""
+            info("""
                 FS Event Detected:
                   ID: \(eventId)
                   Path: \(path)
                   Raw Flags: \(String(format: "0x%08X", flags))
                   Interpreted Flags: \(flagsDict)
-                """, category: logCategory)
+                """)
 
             // --- Event Creation ---
              let event = RedEyeEvent(
@@ -216,7 +216,7 @@ class FSEventMonitorManager: BaseMonitorManager {
 
         // Add note for uninterpreted flags
         if interpretations.isEmpty && flags != 0 {
-             RedEyeLogger.debug("FSEvent received with flags \(String(format: "0x%08X", flags)) but no specific item flags matched.", category: logCategory)
+             debug("FSEvent received with flags \(String(format: "0x%08X", flags)) but no specific item flags matched.")
              interpretations["fs_note"] = "No specific item flags detected (might be dir change, volume event, or other)"
          } else if flags == 0 {
              interpretations["fs_note"] = "Flags were zero."

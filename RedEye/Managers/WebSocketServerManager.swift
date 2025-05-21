@@ -6,10 +6,12 @@ import NIOPosix
 import NIOHTTP1
 import NIOWebSocket
 import WebSocketKit
+import os
 
-class WebSocketServerManager: EventBusSubscriber {
+class WebSocketServerManager: EventBusSubscriber, Loggable {
+    var logCategoryForInstance: String { return "WebSocketServerManager" }
+    var instanceLogger: Logger { Logger(subsystem: RedEyeLogger.subsystem, category: self.logCategoryForInstance) }
 
-    private static let logCategory = "WebSocketServerManager"
     
     private let port: Int = 8765
     private var serverChannel: Channel?
@@ -32,12 +34,12 @@ class WebSocketServerManager: EventBusSubscriber {
             encoder.dateEncodingStrategy = .iso8601
             return encoder
         }()
-        RedEyeLogger.info("WebSocketServerManager initialized.", category: WebSocketServerManager.logCategory)
+        info("WebSocketServerManager initialized.")
     }
 
     func startServer() {
         guard let group = self.group else {
-            RedEyeLogger.error("EventLoopGroup not initialized.", category: "WebSocketServerManager")
+            error("EventLoopGroup not initialized.")
             return
         }
         
@@ -45,7 +47,7 @@ class WebSocketServerManager: EventBusSubscriber {
         if let bus = self.eventBus, !isSubscribedToBus {
             bus.subscribe(self)
             isSubscribedToBus = true
-            RedEyeLogger.info("WebSocketServerManager subscribed to EventBus.", category: WebSocketServerManager.logCategory)
+            info("WebSocketServerManager subscribed to EventBus.")
         }
 
         // This is the pattern from WebSocketKitTests/Utilities.swift, inlined:
@@ -53,7 +55,7 @@ class WebSocketServerManager: EventBusSubscriber {
             maxFrameSize: 1 << 14, // Default max frame size
             automaticErrorHandling: true, // Recommended by NIO
             shouldUpgrade: { (channel: Channel, head: HTTPRequestHead) -> EventLoopFuture<HTTPHeaders?> in
-                RedEyeLogger.debug("WebSocket upgrade request for URI: \(head.uri)", category: "WebSocketServerManager")
+                self.debug("WebSocket upgrade request for URI: \(head.uri)")
                 // For RedEye, we accept all WebSocket upgrade requests on our specific port.
                 return channel.eventLoop.makeSucceededFuture([:]) // Empty headers, accept upgrade
             },
@@ -61,7 +63,7 @@ class WebSocketServerManager: EventBusSubscriber {
                 // This closure is called after the WebSocket handshake is successful.
                 // It's responsible for configuring the pipeline for WebSocket frames.
                 // We use WebSocketKit's WebSocket.server here.
-                RedEyeLogger.info("WebSocket client HTTP handshake successful for URI: \(head.uri). Setting up WebSocket handlers.", category: "WebSocketServerManager")
+                self.info("WebSocket client HTTP handshake successful for URI: \(head.uri). Setting up WebSocket handlers.")
                 
                 // WebSocket.server(on: channel, onUpgrade: callback)
                 // The onUpgrade callback receives the WebSocketKit.WebSocket object.
@@ -87,7 +89,7 @@ class WebSocketServerManager: EventBusSubscriber {
                         completionHandler: { ctx in
                             // This is called after the upgrade is completed and HTTP handlers
                             // (that are no longer needed) are removed from the pipeline.
-                            RedEyeLogger.debug("HTTP server pipeline upgrade processing fully completed for a client.", category: "WebSocketServerManager")
+                            self.debug("HTTP server pipeline upgrade processing fully completed for a client.")
                         }
                     )
                 )
@@ -96,22 +98,22 @@ class WebSocketServerManager: EventBusSubscriber {
         do {
             let channel = try bootstrap.bind(host: "localhost", port: self.port).wait()
             self.serverChannel = channel
-            RedEyeLogger.info("WebSocket server started and listening on ws://localhost:\(self.port)", category: "WebSocketServerManager")
+            info("WebSocket server started and listening on ws://localhost:\(self.port)")
         } catch {
-            RedEyeLogger.error("Failed to start WebSocket server: \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
+            self.error("Failed to start WebSocket server: \(error.localizedDescription)", error: error)
             stopServerCleanup()
         }
     }
     
     private func handleNewClient(webSocket: WebSocket, requestHead: HTTPRequestHead) {
         let clientID = UUID()
-        RedEyeLogger.info("WebSocket client connected: \(clientID) from URI: \(requestHead.uri)", category: "WebSocketServerManager")
+        info("WebSocket client connected: \(clientID) from URI: \(requestHead.uri)")
         self.connectedClients[clientID] = webSocket
 
         webSocket.onText { [weak self] ws, text in // Use 'ws' as provided by the closure
             guard let self = self else { return } // Ensure self is valid
 
-            RedEyeLogger.debug("Received text from client \(clientID): \(text)", category: WebSocketServerManager.logCategory)
+            debug("Received text from client \(clientID): \(text)")
             
             // The `ws` object (WebSocketKit.WebSocket) is an EventLoopBoundBox.
             // Its methods (like send) are designed to be called from its event loop or
@@ -120,47 +122,47 @@ class WebSocketServerManager: EventBusSubscriber {
                 let responseString = await self.ipcCommandHandler.handleRawCommand(text, from: clientID)
                 
                 if let response = responseString {
-                    RedEyeLogger.debug("Sending response to client \(clientID): \(response)", category: WebSocketServerManager.logCategory)
+                    self.debug("Sending response to client \(clientID): \(response)")
                     do {
                         try await ws.send(response)
                     } catch {
-                        RedEyeLogger.error("Failed to send response to client \(clientID): \(error.localizedDescription)", category: WebSocketServerManager.logCategory, error: error)
+                        self.error("Failed to send response to client \(clientID): \(error.localizedDescription)", error: error)
                         // Optionally, try to close the WebSocket if sending fails catastrophically,
                         // or just log and let the connection continue if it's a transient issue.
                         // Example: _ = ws.close(code: .unexpectedServerError)
                     }
                 } else {
-                    RedEyeLogger.debug("IPCCommandHandler did not return a response string for client \(clientID) command: \(text)", category: WebSocketServerManager.logCategory)
+                    self.debug("IPCCommandHandler did not return a response string for client \(clientID) command: \(text)")
                 }
             }
         }
         
         webSocket.onBinary { [weak self] ws, buffer in
             guard let self = self else { return }
-            RedEyeLogger.debug("Received binary data from client \(clientID). Length: \(buffer.readableBytes)", category: "WebSocketServerManager")
+            debug("Received binary data from client \(clientID). Length: \(buffer.readableBytes)")
         }
 
         webSocket.onClose.whenComplete { [weak self] result in
             guard let self = self else { return }
-            RedEyeLogger.info("WebSocket client disconnected: \(clientID)", category: "WebSocketServerManager")
+            info("WebSocket client disconnected: \(clientID)")
             self.connectedClients.removeValue(forKey: clientID)
             
             switch result {
             case .success():
                 let closeCodeString = webSocket.closeCode.map { String(describing: $0) } ?? "N/A"
-                RedEyeLogger.info("Client \(clientID) connection closed gracefully. Code: \(closeCodeString)", category: "WebSocketServerManager")
+                info("Client \(clientID) connection closed gracefully. Code: \(closeCodeString)")
             case .failure(let error):
                 // This is where we'd catch errors that lead to a close.
-                RedEyeLogger.error("Client \(clientID) connection closed with error: \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
+                self.error("Client \(clientID) connection closed with error: \(error.localizedDescription)", error: error)
             }
         }
         
         webSocket.onPing { ws, data in
-             RedEyeLogger.debug("Received Ping from client \(clientID). Data: \(data.readableBytes) bytes. (Pong is auto-sent by stack)", category: "WebSocketServerManager")
+            self.debug("Received Ping from client \(clientID). Data: \(data.readableBytes) bytes. (Pong is auto-sent by stack)")
         }
         
         webSocket.onPong { ws, data in
-             RedEyeLogger.debug("Received Pong from client \(clientID). Data: \(data.readableBytes) bytes", category: "WebSocketServerManager")
+            self.debug("Received Pong from client \(clientID). Data: \(data.readableBytes) bytes")
         }
     }
         
@@ -174,57 +176,57 @@ class WebSocketServerManager: EventBusSubscriber {
         do {
             let jsonData = try self.jsonEncoder.encode(event)
             guard let jsonString = String(data: jsonData, encoding: .utf8) else {
-                RedEyeLogger.error("Failed to convert RedEyeEvent to JSON string for broadcasting.", category: WebSocketServerManager.logCategory)
+                error("Failed to convert RedEyeEvent to JSON string for broadcasting.")
                 return
             }
 
             if connectedClients.isEmpty {
                 // EventBus already logs if no subscribers; WSSM might still want to log this specific state.
-                RedEyeLogger.debug("No WebSocket clients connected. Event from bus not broadcasted.", category: WebSocketServerManager.logCategory)
+                debug("No WebSocket clients connected. Event from bus not broadcasted.")
                 return
             }
 
-            RedEyeLogger.debug("Broadcasting event (\(event.eventType)) from bus to \(connectedClients.count) client(s).", category: WebSocketServerManager.logCategory)
-            // RedEyeLogger.debug("Event JSON for broadcast: \(jsonString)", category: "WebSocketServerManager")
+            debug("Broadcasting event (\(event.eventType)) from bus to \(connectedClients.count) client(s).")
+            // debug("Event JSON for broadcast: \(jsonString)")
 
             for (clientID, ws) in connectedClients {
-                // RedEyeLogger.debug("Sending event to client \(clientID).", category: WebSocketServerManager.logCategory)
+                // debug("Sending event to client \(clientID).")
                 ws.send(jsonString)
             }
         } catch {
-            RedEyeLogger.error("Failed to encode RedEyeEvent for broadcasting: \(error.localizedDescription)", category: WebSocketServerManager.logCategory, error: error)
+            self.error("Failed to encode RedEyeEvent for broadcasting: \(error.localizedDescription)", error: error)
         }
     }
 
     func stopServer() {
-        RedEyeLogger.info("Attempting to stop WebSocket server...", category: "WebSocketServerManager")
+        info("Attempting to stop WebSocket server...")
         
         if let bus = self.eventBus, isSubscribedToBus {
             bus.unsubscribe(self)
             isSubscribedToBus = false
-            RedEyeLogger.info("WebSocketServerManager unsubscribed from EventBus.", category: WebSocketServerManager.logCategory)
+            info("WebSocketServerManager unsubscribed from EventBus.")
         }
 
         for (id, ws) in connectedClients {
-            RedEyeLogger.info("Closing connection to client \(id)...", category: "WebSocketServerManager")
+            info("Closing connection to client \(id)...")
             ws.close(code: .goingAway, promise: nil)
         }
         connectedClients.removeAll()
 
         serverChannel?.close(mode: .all, promise: nil)
-        RedEyeLogger.info("Server channel close initiated.", category: "WebSocketServerManager")
+        info("Server channel close initiated.")
         
         stopServerCleanup()
     }
     
     private func stopServerCleanup() {
         if let group = self.group {
-            RedEyeLogger.debug("Shutting down EventLoopGroup...", category: "WebSocketServerManager")
+            debug("Shutting down EventLoopGroup...")
             group.shutdownGracefully { error in
                 if let error = error {
-                    RedEyeLogger.error("Failed to shut down EventLoopGroup gracefully: \(error.localizedDescription)", category: "WebSocketServerManager", error: error)
+                    self.error("Failed to shut down EventLoopGroup gracefully: \(error.localizedDescription)", error: error)
                 } else {
-                    RedEyeLogger.info("EventLoopGroup shut down gracefully.", category: "WebSocketServerManager")
+                    self.info("EventLoopGroup shut down gracefully.")
                 }
             }
         }
@@ -235,7 +237,7 @@ class WebSocketServerManager: EventBusSubscriber {
     // MARK: - EventBusSubscriber Conformance
     func handleEvent(_ event: RedEyeEvent, on eventBus: EventBus) {
         // This method will be called by the MainEventBus on the main thread.
-        RedEyeLogger.debug("WebSocketServerManager received event \(event.eventType) from EventBus.", category: WebSocketServerManager.logCategory)
+        debug("WebSocketServerManager received event \(event.eventType) from EventBus.")
         
         // The actual broadcast involves network I/O, so it's good practice
         // to ensure it happens on the appropriate thread (WebSocketKit handles this via EventLoop).

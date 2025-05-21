@@ -1,6 +1,7 @@
 // RedEye/Events/MainEventBus.swift
 
 import Foundation
+import os
 
 // Helper struct to store weak references to EventBusSubscriber
 // This is specifically typed to EventBusSubscriber now.
@@ -11,14 +12,16 @@ private struct WeakSubscriber {
     }
 }
 
-class MainEventBus: EventBus {
+class MainEventBus: EventBus, Loggable {
+    var logCategoryForInstance: String { return "MainEventBus" }
+    var instanceLogger: Logger { Logger(subsystem: RedEyeLogger.subsystem, category: self.logCategoryForInstance) }
 
-    private static let logCategory = "MainEventBus"
+    private static let logCategory = ""
     private var subscribers: [WeakSubscriber] = []
     private let busQueue = DispatchQueue(label: "com.vic.RedEye.MainEventBusQueue", qos: .utility)
 
     init() {
-        RedEyeLogger.info("MainEventBus initialized.", category: MainEventBus.logCategory)
+        info("MainEventBus initialized.")
     }
 
     func subscribe(_ subscriber: EventBusSubscriber) {
@@ -27,15 +30,15 @@ class MainEventBus: EventBus {
             self.subscribers.removeAll { $0.value == nil }
             if !self.subscribers.contains(where: { $0.value === subscriber }) {
                 
-                RedEyeLogger.debug("DEBUG: subscribe - \(String(describing: type(of: subscriber))) - Before add, count: \(self.subscribers.compactMap{$0.value}.count)", category: MainEventBus.logCategory) // Generic logging
+                debug("DEBUG: subscribe - \(String(describing: type(of: subscriber))) - Before add, count: \(self.subscribers.compactMap{$0.value}.count)") // Generic logging
 
                 self.subscribers.append(WeakSubscriber(subscriber))
                 
-                RedEyeLogger.debug("DEBUG: subscribe - \(String(describing: type(of: subscriber))) - After add, count: \(self.subscribers.compactMap{$0.value}.count)", category: MainEventBus.logCategory) // Generic logging
+                debug("DEBUG: subscribe - \(String(describing: type(of: subscriber))) - After add, count: \(self.subscribers.compactMap{$0.value}.count)") // Generic logging
 
-                RedEyeLogger.debug("Subscriber \(type(of: subscriber)) added. Total: \(self.subscribers.compactMap{$0.value}.count)", category: MainEventBus.logCategory)
+                debug("Subscriber \(type(of: subscriber)) added. Total: \(self.subscribers.compactMap{$0.value}.count)")
             } else {
-                RedEyeLogger.debug("Subscriber \(type(of: subscriber)) already exists.", category: MainEventBus.logCategory)
+                debug("Subscriber \(type(of: subscriber)) already exists.")
             }
         }
     }
@@ -45,17 +48,17 @@ class MainEventBus: EventBus {
             guard let self = self else { return }
             let initialCount = self.subscribers.compactMap{$0.value}.count
             
-            RedEyeLogger.debug("DEBUG: unsubscribe - \(String(describing: type(of: subscriber))) - Before remove, count: \(self.subscribers.compactMap{$0.value}.count)", category: MainEventBus.logCategory) // Generic logging
+            debug("DEBUG: unsubscribe - \(String(describing: type(of: subscriber))) - Before remove, count: \(self.subscribers.compactMap{$0.value}.count)") // Generic logging
 
             self.subscribers.removeAll { $0.value == nil || $0.value === subscriber }
             
-            RedEyeLogger.debug("DEBUG: unsubscribe - \(String(describing: type(of: subscriber))) - After remove, count: \(self.subscribers.compactMap{$0.value}.count)", category: MainEventBus.logCategory) // Generic logging
+            debug("DEBUG: unsubscribe - \(String(describing: type(of: subscriber))) - After remove, count: \(self.subscribers.compactMap{$0.value}.count)") // Generic logging
 
             let finalCount = self.subscribers.compactMap{$0.value}.count
             if initialCount != finalCount {
-                RedEyeLogger.debug("Subscriber \(type(of: subscriber)) removed. Total: \(finalCount)", category: MainEventBus.logCategory)
+                debug("Subscriber \(type(of: subscriber)) removed. Total: \(finalCount)")
             } else {
-                RedEyeLogger.debug("Subscriber \(type(of: subscriber)) not found for removal.", category: MainEventBus.logCategory)
+                debug("Subscriber \(type(of: subscriber)) not found for removal.")
             }
         }
     }
@@ -64,28 +67,28 @@ class MainEventBus: EventBus {
         busQueue.async { [weak self] in
             guard let self = self else { return }
 
-            RedEyeLogger.debug("DEBUG: publish - Entering busQueue block for event \(event.eventType)", category: MainEventBus.logCategory)
+            debug("DEBUG: publish - Entering busQueue block for event \(event.eventType)")
 
             // Get a snapshot of current, valid subscribers
             let currentSubscribersObjects = self.subscribers.compactMap { $0.value }
 
-            RedEyeLogger.debug("DEBUG: publish - Snapshot count: \(currentSubscribersObjects.count)", category: MainEventBus.logCategory)
+            debug("DEBUG: publish - Snapshot count: \(currentSubscribersObjects.count)")
 
             if currentSubscribersObjects.isEmpty {
-                RedEyeLogger.debug("No subscribers to publish event \(event.eventType).", category: MainEventBus.logCategory)
+                debug("No subscribers to publish event \(event.eventType).")
                 self.logEvent(event, wasDelivered: false)
                 return
             }
             
-            RedEyeLogger.debug("Publishing event \(event.eventType) to \(currentSubscribersObjects.count) subscriber(s).", category: MainEventBus.logCategory)
+            debug("Publishing event \(event.eventType) to \(currentSubscribersObjects.count) subscriber(s).")
             self.logEvent(event, wasDelivered: true)
 
             for subscriberInstance in currentSubscribersObjects {
-                RedEyeLogger.debug("DEBUG: publish - Scheduling main.async for subscriber \(String(describing: type(of: subscriberInstance)))", category: MainEventBus.logCategory) // Generic logging
+                debug("DEBUG: publish - Scheduling main.async for subscriber \(String(describing: type(of: subscriberInstance)))") // Generic logging
 
                 DispatchQueue.main.async {
 
-                    RedEyeLogger.debug("DEBUG: publish - Executing on main for subscriber \(String(describing: type(of: subscriberInstance))) for event \(event.eventType)", category: MainEventBus.logCategory) // Generic logging
+                    self.debug("DEBUG: publish - Executing on main for subscriber \(String(describing: type(of: subscriberInstance))) for event \(event.eventType)") // Generic logging
 
                     // subscriberInstance is already guaranteed non-nil here due to compactMap
                     subscriberInstance.handleEvent(event, on: self)
@@ -102,12 +105,12 @@ class MainEventBus: EventBus {
             let jsonData = try encoder.encode(event)
             if let jsonString = String(data: jsonData, encoding: .utf8) {
                 let deliveryStatus = wasDelivered ? "Published" : "Not Published (No Subscribers)"
-                RedEyeLogger.info("--- RedEyeEvent \(deliveryStatus) (via EventBus) ---", category: MainEventBus.logCategory)
-                RedEyeLogger.info(jsonString, category: MainEventBus.logCategory)
-                RedEyeLogger.info("------------------------------------", category: MainEventBus.logCategory)
+                info("--- RedEyeEvent \(deliveryStatus) (via EventBus) ---")
+                info(jsonString)
+                info("------------------------------------")
             }
         } catch {
-            RedEyeLogger.error("Failed to encode RedEyeEvent for EventBus logging", category: MainEventBus.logCategory, error: error)
+            self.error("Failed to encode RedEyeEvent for EventBus logging", error: error)
         }
     }
     
@@ -124,9 +127,9 @@ class MainEventBus: EventBus {
         // Wait for the group to be empty (i.e., the block on busQueue has executed)
         let waitResult = group.wait(timeout: .now() + timeout)
         if waitResult == .timedOut {
-            RedEyeLogger.error("waitForQueueToProcess timed out waiting for busQueue.", category: MainEventBus.logCategory)
+            error("waitForQueueToProcess timed out waiting for busQueue.")
         } else {
-            RedEyeLogger.debug("waitForQueueToProcess completed.", category: MainEventBus.logCategory)
+            debug("waitForQueueToProcess completed.")
         }
     }
     #endif

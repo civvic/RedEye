@@ -47,7 +47,6 @@ class MainEventBusTests: XCTestCase {
         eventBus = MainEventBus() // Create a fresh bus for each test
         mockSubscriber1 = MockEventBusSubscriber(id: UUID(), expectation: nil) // Expectation set per test
         mockSubscriber2 = MockEventBusSubscriber(id: UUID(), expectation: nil) // Expectation set per test
-        RedEyeLogger.isVerboseLoggingEnabled = true // Enable for test logs
     }
 
     override func tearDownWithError() throws {

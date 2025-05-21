@@ -1,6 +1,7 @@
 // RedEye/Config/ConfigurationManager.swift
 
 import Foundation
+import os
 
 protocol ConfigurationManaging: AnyObject {
     // MARK: - Configuration Access
@@ -40,7 +41,9 @@ protocol ConfigurationManaging: AnyObject {
     func getCapabilities() -> [String: JSONValue] // Simplified return type for now
 }
 
-class ConfigurationManager: ConfigurationManaging {
+class ConfigurationManager: ConfigurationManaging, Loggable {
+    var logCategoryForInstance: String { return "ConfigurationManager" }
+    var instanceLogger: Logger { Logger(subsystem: RedEyeLogger.subsystem, category: self.logCategoryForInstance) }
 
     private static let logCategory = "ConfigurationManager"
     private let appName = "RedEye" // Or Bundle.main.infoDictionary?[kCFBundleNameKey as String] as? String ?? "RedEye"
@@ -86,7 +89,13 @@ class ConfigurationManager: ConfigurationManaging {
                 RedEyeLogger.error("CRITICAL: Failed to save default configuration to \(self.configFileURL.path) (Reason: \(saveError.localizedDescription)). Config might not persist.", category: logInitCategory, error: saveError)
             }
         }
-        RedEyeLogger.info("ConfigurationManager designated initialization complete. Effective schema: \(self.currentConfig.schemaVersion)", category: logInitCategory)
+        if let configuredLevel = self.currentConfig.generalSettings.logLevel {
+            RedEyeLogger.currentLevel = configuredLevel
+            info("Log level set from configuration: \(configuredLevel)")
+        } else {
+            info("No log level in config, using default: \(RedEyeLogger.currentLevel)")
+        }
+        info("ConfigurationManager designated initialization complete. Effective schema: \(self.currentConfig.schemaVersion)")
     }
 
     // MARK: - Public Convenience Initializer
@@ -100,50 +109,63 @@ class ConfigurationManager: ConfigurationManaging {
             let redEyeAppSupportDir = appSupportDir.appendingPathComponent(appNameForPath, isDirectory: true)
             calculatedURL = redEyeAppSupportDir.appendingPathComponent(configFileNameForPath)
         } else {
-            RedEyeLogger.fault("CRITICAL: Could not find Application Support directory. Defaulting to temporary config path.", category: logAppSupportCategory)
+            RedEyeLogger.fault("CRITICAL: Could not find Application Support directory. Defaulting to temporary config path.", category: ConfigurationManager.logCategory)
             calculatedURL = FileManager.default.temporaryDirectory
                 .appendingPathComponent(appNameForPath)
                 .appendingPathComponent(configFileNameForPath)
-            RedEyeLogger.error("RedEye will use a temporary configuration path: \(calculatedURL.path). Settings will not persist across launches.", category: logAppSupportCategory)
+            RedEyeLogger.error("RedEye will use a temporary configuration path: \(calculatedURL.path). Settings will not persist across launches.", category: ConfigurationManager.logCategory)
         }
         
         self.init(determinedConfigFileURL: calculatedURL) // Call the designated initializer
-        RedEyeLogger.info("ConfigurationManager public convenience initialization complete.", category: logAppSupportCategory)
+        info("ConfigurationManager public convenience initialization complete.")
     }
 
     // MARK: - Internal Convenience Initializer for Testing
     #if DEBUG // Or a specific TESTING build flag
     internal convenience init(testingConfigFileURL: URL) {
         self.init(determinedConfigFileURL: testingConfigFileURL)
-        RedEyeLogger.info("Initialized ConfigurationManager with TESTING URL: \(testingConfigFileURL.path)", category: "\(ConfigurationManager.logCategory).testingInit")
+        RedEyeLogger.info("Initialized ConfigurationManager with TESTING URL: \(testingConfigFileURL.path)", category: "\(self.logCategoryForInstance).testingInit")
     }
     #endif
 
+    // << NEW: Helper method to apply log level >>
+    private func applyLogLevelFromConfig(config: RedEyeConfig, logCategoryForUpdate: String) {
+        if let configuredLevel = config.generalSettings.logLevel {
+            if RedEyeLogger.currentLevel != configuredLevel { // Only log if it's actually changing
+                RedEyeLogger.info("Setting log level from configuration: \(configuredLevel)", category: logCategoryForUpdate)
+                RedEyeLogger.currentLevel = configuredLevel
+            } else {
+                RedEyeLogger.debug("Log level from config (\(configuredLevel)) matches current logger level. No change.", category: logCategoryForUpdate)
+            }
+        } else {
+            RedEyeLogger.info("No explicit logLevel in configuration. RedEyeLogger will use its default (\(RedEyeLogger.currentLevel)).", category: logCategoryForUpdate)
+        }
+    }
 
     // MARK: - Static File Operations
     
     /// Loads configuration data from the specified URL.
     private static func performLoadConfiguration(url: URL, decoder: JSONDecoder) throws -> RedEyeConfig {
-        RedEyeLogger.debug("Static: performLoadConfiguration from URL: \(url.path)", category: logCategory)
+        RedEyeLogger.debug("Static: performLoadConfiguration from URL: \(url.path)", category: ConfigurationManager.logCategory)
         guard FileManager.default.fileExists(atPath: url.path) else {
-            RedEyeLogger.debug("Static: Config file not found at \(url.path)", category: logCategory)
+            RedEyeLogger.debug("Static: Config file not found at \(url.path)", category: ConfigurationManager.logCategory)
             throw ConfigError.fileNotFound
         }
         do {
             let data = try Data(contentsOf: url)
-            RedEyeLogger.debug("Static: Successfully read \(data.count) bytes from \(url.path)", category: logCategory)
+            RedEyeLogger.debug("Static: Successfully read \(data.count) bytes from \(url.path)", category: ConfigurationManager.logCategory)
             let config = try decoder.decode(RedEyeConfig.self, from: data)
-            RedEyeLogger.debug("Static: Successfully decoded config. Schema version: \(config.schemaVersion)", category: logCategory)
+            RedEyeLogger.debug("Static: Successfully decoded config. Schema version: \(config.schemaVersion)", category: ConfigurationManager.logCategory)
             return config
         } catch let readError as NSError where readError.domain == NSCocoaErrorDomain && readError.code == NSFileReadNoSuchFileError {
             // This catch block might be redundant if fileExistsAtPath is checked first, but good for robustness.
-            RedEyeLogger.debug("Static: Config file explicitly reported as not found during read: \(url.path)", category: logCategory)
+            RedEyeLogger.debug("Static: Config file explicitly reported as not found during read: \(url.path)", category: ConfigurationManager.logCategory)
             throw ConfigError.fileNotFound
         } catch let decodingError as DecodingError {
-            RedEyeLogger.error("Static: DecodingError during config load: \(decodingError.localizedDescription). Context: \(decodingError)", category: logCategory, error: decodingError)
+            RedEyeLogger.error("Static: DecodingError during config load: \(decodingError.localizedDescription). Context: \(decodingError)", category: ConfigurationManager.logCategory, error: decodingError)
             throw ConfigError.deserializationFailed(decodingError)
         } catch {
-            RedEyeLogger.error("Static: Generic error during config load from \(url.path): \(error.localizedDescription)", category: logCategory, error: error)
+            RedEyeLogger.error("Static: Generic error during config load from \(url.path): \(error.localizedDescription)", category: ConfigurationManager.logCategory, error: error)
             throw ConfigError.fileReadFailed(error)
         }
     }
@@ -151,30 +173,30 @@ class ConfigurationManager: ConfigurationManaging {
     /// Saves configuration data to the specified URL.
     /// Creates the necessary directory if it doesn't exist.
     private static func performSaveConfiguration(config: RedEyeConfig, url: URL, encoder: JSONEncoder, appName: String) throws {
-        RedEyeLogger.debug("Static: performSaveConfiguration to URL: \(url.path) for schema version \(config.schemaVersion)", category: logCategory)
+        RedEyeLogger.debug("Static: performSaveConfiguration to URL: \(url.path) for schema version \(config.schemaVersion)", category: ConfigurationManager.logCategory)
         do {
             // Ensure directory exists
             let directoryURL = url.deletingLastPathComponent()
             if !FileManager.default.fileExists(atPath: directoryURL.path) {
-                RedEyeLogger.info("Static: Configuration directory not found at \(directoryURL.path). Attempting to create.", category: logCategory)
+                RedEyeLogger.info("Static: Configuration directory not found at \(directoryURL.path). Attempting to create.", category: ConfigurationManager.logCategory)
                 do {
                     try FileManager.default.createDirectory(at: directoryURL, withIntermediateDirectories: true, attributes: nil)
-                    RedEyeLogger.info("Static: Successfully created configuration directory: \(directoryURL.path)", category: logCategory)
+                    RedEyeLogger.info("Static: Successfully created configuration directory: \(directoryURL.path)", category: ConfigurationManager.logCategory)
                 } catch {
-                    RedEyeLogger.error("Static: Failed to create configuration directory \(directoryURL.path): \(error.localizedDescription)", category: logCategory, error: error)
+                    RedEyeLogger.error("Static: Failed to create configuration directory \(directoryURL.path): \(error.localizedDescription)", category: ConfigurationManager.logCategory, error: error)
                     throw ConfigError.directoryCreationFailed(error)
                 }
             }
 
             let data = try encoder.encode(config)
-            RedEyeLogger.debug("Static: Successfully encoded config. Data size: \(data.count) bytes.", category: logCategory)
+            RedEyeLogger.debug("Static: Successfully encoded config. Data size: \(data.count) bytes.", category: ConfigurationManager.logCategory)
             try data.write(to: url, options: .atomicWrite) // .atomicWrite is safer
-            RedEyeLogger.debug("Static: Successfully wrote config data to \(url.path)", category: logCategory)
+            RedEyeLogger.debug("Static: Successfully wrote config data to \(url.path)", category: ConfigurationManager.logCategory)
         } catch let encodingError as EncodingError {
-            RedEyeLogger.error("Static: EncodingError during config save: \(encodingError.localizedDescription). Context: \(encodingError)", category: logCategory, error: encodingError)
+            RedEyeLogger.error("Static: EncodingError during config save: \(encodingError.localizedDescription). Context: \(encodingError)", category: ConfigurationManager.logCategory, error: encodingError)
             throw ConfigError.serializationFailed(encodingError)
         } catch {
-            RedEyeLogger.error("Static: Generic error during config save to \(url.path): \(error.localizedDescription)", category: logCategory, error: error)
+            RedEyeLogger.error("Static: Generic error during config save to \(url.path): \(error.localizedDescription)", category: ConfigurationManager.logCategory, error: error)
             throw ConfigError.fileWriteFailed(error)
         }
     }
@@ -207,11 +229,11 @@ class ConfigurationManager: ConfigurationManaging {
     func setMonitorEnabled(type: MonitorType, isEnabled: Bool) throws {
         try configQueue.sync { // `sync` here makes the method blocking and allows throwing errors out
             guard self.currentConfig.monitorSettings[type.rawValue] != nil else {
-                RedEyeLogger.error("Attempted to set 'isEnabled' for unknown monitor type: \(type.rawValue)", category: ConfigurationManager.logCategory)
+                error("Attempted to set 'isEnabled' for unknown monitor type: \(type.rawValue)")
                 throw ConfigError.unknownMonitorType(type.rawValue)
             }
             self.currentConfig.monitorSettings[type.rawValue]?.isEnabled = isEnabled
-            RedEyeLogger.info("Monitor '\(type.rawValue)' isEnabled set to \(isEnabled). Attempting to save.", category: ConfigurationManager.logCategory)
+            info("Monitor '\(type.rawValue)' isEnabled set to \(isEnabled). Attempting to save.")
             try Self.performSaveConfiguration(config: self.currentConfig, url: self.configFileURL, encoder: self.encoder, appName: self.appName)
             // TODO: Future: Notify relevant components about the config change.
         }
@@ -220,12 +242,12 @@ class ConfigurationManager: ConfigurationManaging {
     func setMonitorParameters(type: MonitorType, parameters: [String : JSONValue]?) throws {
         try configQueue.sync {
             guard self.currentConfig.monitorSettings[type.rawValue] != nil else {
-                RedEyeLogger.error("Attempted to set 'parameters' for unknown monitor type: \(type.rawValue)", category: ConfigurationManager.logCategory)
+                error("Attempted to set 'parameters' for unknown monitor type: \(type.rawValue)")
                 throw ConfigError.unknownMonitorType(type.rawValue)
             }
             self.currentConfig.monitorSettings[type.rawValue]?.parameters = parameters
             let paramsDescription = parameters?.mapValues { $0.debugDescription }.description ?? "nil"
-            RedEyeLogger.info("Monitor '\(type.rawValue)' parameters set to \(paramsDescription). Attempting to save.", category: ConfigurationManager.logCategory)
+            info("Monitor '\(type.rawValue)' parameters set to \(paramsDescription). Attempting to save.")
             try Self.performSaveConfiguration(config: self.currentConfig, url: self.configFileURL, encoder: self.encoder, appName: self.appName)
             // TODO: Future: Notify relevant components.
         }
@@ -234,7 +256,20 @@ class ConfigurationManager: ConfigurationManaging {
     func updateGeneralSettings(newSettings: GeneralAppSettings) throws {
         try configQueue.sync {
             self.currentConfig.generalSettings = newSettings
-            RedEyeLogger.info("General settings updated. Attempting to save. New 'showPluginPanelOnHotkeyCapture': \(newSettings.showPluginPanelOnHotkeyCapture)", category: ConfigurationManager.logCategory)
+            info("General settings updated. Attempting to save. New panel capture: \(newSettings.showPluginPanelOnHotkeyCapture), New LogLevel: \(String(describing: newSettings.logLevel))")
+            
+            // << NEW: Apply log level if it changed >>
+            if let newLogLevel = newSettings.logLevel {
+                if RedEyeLogger.currentLevel != newLogLevel {
+                    info("Updating RedEyeLogger.currentLevel to: \(newLogLevel) due to setGeneralSettings IPC command.")
+                    RedEyeLogger.currentLevel = newLogLevel
+                }
+            } // If newSettings.logLevel is nil, we don't change RedEyeLogger.currentLevel from this IPC.
+              // To "unset" and revert to default, a specific mechanism or nil in config and restart would be needed.
+              // Or, if newSettings.logLevel is nil, we could explicitly set RedEyeLogger.currentLevel to its compiled default.
+              // For now, if nil is passed in update, it means "don't change log level from what it currently is".
+              // If the *file* has null, on next load it will use default.
+
             try Self.performSaveConfiguration(config: self.currentConfig, url: self.configFileURL, encoder: self.encoder, appName: self.appName)
             // TODO: Future: Notify relevant components.
         }
@@ -242,8 +277,12 @@ class ConfigurationManager: ConfigurationManaging {
     
     func resetToDefaults() throws {
         try configQueue.sync {
-            RedEyeLogger.info("Resetting configuration to defaults and saving.", category: ConfigurationManager.logCategory)
+            info("Resetting configuration to defaults and saving.")
             self.currentConfig = RedEyeConfig.defaultConfig()
+            
+            // << NEW: Apply log level from the new default config >>
+            self.applyLogLevelFromConfig(config: self.currentConfig, logCategoryForUpdate: ConfigurationManager.logCategory)
+            
             try Self.performSaveConfiguration(config: self.currentConfig, url: self.configFileURL, encoder: self.encoder, appName: self.appName)
             // TODO: Future: Notify relevant components.
         }
@@ -254,7 +293,7 @@ class ConfigurationManager: ConfigurationManaging {
     func saveConfiguration() throws {
         // This public save method also uses the queue to serialize access.
         try configQueue.sync {
-            RedEyeLogger.info("Explicit saveConfiguration called. Saving current in-memory config.", category: ConfigurationManager.logCategory)
+            info("Explicit saveConfiguration called. Saving current in-memory config.")
             try Self.performSaveConfiguration(config: self.currentConfig, url: self.configFileURL, encoder: self.encoder, appName: self.appName)
         }
     }
@@ -262,10 +301,10 @@ class ConfigurationManager: ConfigurationManaging {
     func loadConfiguration() throws {
         // This public load method reloads from disk and updates currentConfig.
         try configQueue.sync {
-            RedEyeLogger.info("Explicit loadConfiguration called. Reloading from disk: \(self.configFileURL.path)", category: ConfigurationManager.logCategory)
+            info("Explicit loadConfiguration called. Reloading from disk: \(self.configFileURL.path)")
             let loadedConfig = try Self.performLoadConfiguration(url: self.configFileURL, decoder: self.decoder)
             self.currentConfig = loadedConfig
-            RedEyeLogger.info("Configuration reloaded successfully from disk. Schema version: \(self.currentConfig.schemaVersion)", category: ConfigurationManager.logCategory)
+            info("Configuration reloaded successfully from disk. Schema version: \(self.currentConfig.schemaVersion)")
             // TODO: Future: Notify ALL components that entire config might have changed.
         }
     }

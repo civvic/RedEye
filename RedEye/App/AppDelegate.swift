@@ -35,7 +35,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // Global debug logging toggle (can stay here or move to AppCoordinator if preferred)
         #if DEBUG
-            RedEyeLogger.isVerboseLoggingEnabled = true
             print("RedEye Dev Note: Verbose debug logging is ENABLED (DEBUG build).")
         #else
             print("RedEye Info: Verbose debug logging is DISABLED (Release build).")

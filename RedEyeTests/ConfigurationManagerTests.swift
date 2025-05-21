@@ -30,7 +30,6 @@ class ConfigurationManagerTests: XCTestCase {
         if fileManager.fileExists(atPath: testConfigURL.path) {
             try fileManager.removeItem(at: testConfigURL)
         }
-        RedEyeLogger.isVerboseLoggingEnabled = true // Enable for more detailed logs during tests
     }
     
     override func tearDownWithError() throws {

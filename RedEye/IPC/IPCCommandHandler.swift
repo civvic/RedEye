@@ -1,10 +1,12 @@
 // RedEye/IPC/IPCCommandHandler.swift (New File)
 
 import Foundation
+import os
 
-class IPCCommandHandler {
+class IPCCommandHandler: Loggable {
+    var logCategoryForInstance: String { return "IPCCommandHandler" }
+    var instanceLogger: Logger { Logger(subsystem: RedEyeLogger.subsystem, category: self.logCategoryForInstance) }
 
-    private static let logCategory = "IPCCommandHandler"
     private let jsonDecoder: JSONDecoder
     private let jsonEncoder: JSONEncoder
 
@@ -16,7 +18,7 @@ class IPCCommandHandler {
         self.jsonEncoder = JSONEncoder() // Initialize encoder
         self.jsonEncoder.outputFormatting = [.prettyPrinted, .sortedKeys] // Consistent with ConfigManager
         self.jsonEncoder.dateEncodingStrategy = .iso8601
-        RedEyeLogger.info("IPCCommandHandler initialized with ConfigurationManager.", category: IPCCommandHandler.logCategory)
+        info("IPCCommandHandler initialized with ConfigurationManager.")
     }
 
     /// Public entry point to handle a raw command string received from an IPC client.
@@ -27,15 +29,15 @@ class IPCCommandHandler {
     ///   - clientID: The unique identifier of the client that sent the command. (Useful for logging & future stateful interactions)
     ///   - webSocket: The WebSocket connection object, if a direct response is needed. (Optional for now, can be added if handlers need to send immediate replies)
     public func handleRawCommand(_ commandString: String, from clientID: UUID) async -> String? {
-        RedEyeLogger.debug("Handling raw command from client \(clientID): \(commandString)", category: IPCCommandHandler.logCategory)
+        debug("Handling raw command from client \(clientID): \(commandString)")
 
         guard let configManager = self.configManager else {
-            RedEyeLogger.error("ConfigurationManager not available in IPCCommandHandler. Cannot process config commands.", category: IPCCommandHandler.logCategory)
+            error("ConfigurationManager not available in IPCCommandHandler. Cannot process config commands.")
             return createErrorResponse(message: "Internal Server Error: Configuration service unavailable.", commandId: nil)
         }
 
         guard let commandData = commandString.data(using: .utf8) else {
-            RedEyeLogger.error("Could not convert command string to Data. Client: \(clientID)", category: IPCCommandHandler.logCategory)
+            error("Could not convert command string to Data. Client: \(clientID)")
             return createErrorResponse(message: "Invalid command format: Not valid UTF-8.", commandId: nil)
         }
 
@@ -43,14 +45,14 @@ class IPCCommandHandler {
         do {
             receivedCommand = try self.jsonDecoder.decode(IPCReceivedCommand.self, from: commandData)
         } catch {
-            RedEyeLogger.error("Failed to decode IPC command from client \(clientID): \(error.localizedDescription)", category: IPCCommandHandler.logCategory, error: error)
+            self.error("Failed to decode IPC command from client \(clientID): \(error.localizedDescription)", error: error)
             return createErrorResponse(message: "Command decoding failed: \(error.localizedDescription)", commandId: nil)
         }
         
-        RedEyeLogger.info("Routing command '\(receivedCommand.action)' (ID: \(receivedCommand.commandId ?? "N/A")) from client \(clientID)", category: IPCCommandHandler.logCategory)
+        info("Routing command '\(receivedCommand.action)' (ID: \(receivedCommand.commandId ?? "N/A")) from client \(clientID)")
 
         guard let action = IPCAction(rawValue: receivedCommand.action) else {
-            RedEyeLogger.error("Unknown action '\(receivedCommand.action)' from client \(clientID).", category: IPCCommandHandler.logCategory)
+            error("Unknown action '\(receivedCommand.action)' from client \(clientID).")
             return createErrorResponse(message: "Unknown action: \(receivedCommand.action)", commandId: receivedCommand.commandId)
         }
 
@@ -116,10 +118,10 @@ class IPCCommandHandler {
                 return createAckResponse(commandId: receivedCommand.commandId, message: "Configuration reset to defaults.")
             }
         } catch let error as IPCError {
-            RedEyeLogger.error("IPCError handling action \(action.rawValue): \(error.localizedDescription)", category: IPCCommandHandler.logCategory, error: error)
+            self.error("IPCError handling action \(action.rawValue): \(error.localizedDescription)", error: error)
             return createErrorResponse(message: error.localizedDescription, commandId: receivedCommand.commandId)
         } catch {
-            RedEyeLogger.error("Unexpected error handling action \(action.rawValue): \(error.localizedDescription)", category: IPCCommandHandler.logCategory, error: error)
+            self.error("Unexpected error handling action \(action.rawValue): \(error.localizedDescription)", error: error)
             return createErrorResponse(message: "Unexpected error: \(error.localizedDescription)", commandId: receivedCommand.commandId)
         }
     }
@@ -128,7 +130,7 @@ class IPCCommandHandler {
 
     private func handleLogMessageFromServer(payload: [String: JSONValue]?, clientID: UUID) async throws {
         let logPayload = try decodePayload(LogMessagePayload.self, from: payload, action: .logMessageFromServer)
-        RedEyeLogger.info("Client \(clientID) says via IPC: \"\(logPayload.message)\"", category: "IPCClientMessage")
+        info("Client \(clientID) says via IPC: \"\(logPayload.message)\"")
     }
 
     // MARK: - Helper Methods for Decoding and Response Creation
@@ -141,7 +143,7 @@ class IPCCommandHandler {
             let jsonData = try JSONSerialization.data(withJSONObject: dict.mapValues { convertJSONValueToAny($0) })
             return try jsonDecoder.decode(T.self, from: jsonData)
         } catch {
-            RedEyeLogger.error("Failed to decode \(String(describing: T.self)) for \(action.rawValue): \(error.localizedDescription)", category: IPCCommandHandler.logCategory, error: error)
+            self.error("Failed to decode \(String(describing: T.self)) for \(action.rawValue): \(error.localizedDescription)", error: error)
             throw IPCError.invalidPayload("Payload for \(action.rawValue) could not be decoded: \(error.localizedDescription)")
         }
     }
@@ -166,7 +168,7 @@ class IPCCommandHandler {
             let jsonData = try jsonEncoder.encode(responseWrapper)
             return String(data: jsonData, encoding: .utf8)
         } catch {
-            RedEyeLogger.error("Failed to encode IPC response: \(error.localizedDescription)", category: IPCCommandHandler.logCategory, error: error)
+            self.error("Failed to encode IPC response: \(error.localizedDescription)", error: error)
             // Fallback error response if encoding the main response fails
             let fallback = IPCResponseWrapper(commandId: responseWrapper.commandId, status: "error", message: "Internal server error: Failed to encode response.", data: nil as String?)
             return String(data: try! jsonEncoder.encode(fallback), encoding: .utf8) // Should not fail

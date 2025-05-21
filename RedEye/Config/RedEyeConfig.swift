@@ -27,6 +27,19 @@ struct MonitorSpecificConfig: Codable {
     // Example: For AppActivation, could include {"enableBrowserURLCapture": .bool(true)}
 }
 
+struct GeneralAppSettings: Codable {
+    // This used to be HotkeyManager.isHotkeyUiEnabled
+    // If the hotkey (e.g., Cmd+Shift+C) successfully captures text, should the plugin UI panel appear?
+    var showPluginPanelOnHotkeyCapture: Bool
+    var logLevel: RedEyeLogger.LogLevel? // Optional, if not set, RedEyeLogger uses its default
+
+    // This used to be AppActivationMonitor.isEnabledBrowserURLCapture.
+    // It's now a parameter of AppActivationMonitor, but we might have a global override
+    // or it's managed within appActivationMonitor's MonitorSpecificConfig.
+    // Let's assume for now specific experimental features are best inside their monitor's params.
+    // var experimentalBrowserURLCaptureEnabled: Bool // Example
+}
+
 // Top-level configuration structure for RedEye
 struct RedEyeConfig: Codable {
     var schemaVersion: String // To manage future config migrations, e.g., "1.0"
@@ -45,22 +58,9 @@ struct RedEyeConfig: Codable {
     }
 }
 
-struct GeneralAppSettings: Codable {
-    // This used to be HotkeyManager.isHotkeyUiEnabled
-    // If the hotkey (e.g., Cmd+Shift+C) successfully captures text, should the plugin UI panel appear?
-    var showPluginPanelOnHotkeyCapture: Bool
-    
-    // This used to be AppActivationMonitor.isEnabledBrowserURLCapture.
-    // It's now a parameter of AppActivationMonitor, but we might have a global override
-    // or it's managed within appActivationMonitor's MonitorSpecificConfig.
-    // Let's assume for now specific experimental features are best inside their monitor's params.
-    // var experimentalBrowserURLCaptureEnabled: Bool // Example
-}
-
 // --- Helper for creating default configurations ---
 extension RedEyeConfig {
-    static func
-defaultConfig() -> RedEyeConfig {
+    static func defaultConfig() -> RedEyeConfig {
         var defaultMonitorSettings: [String: MonitorSpecificConfig] = [:]
 
         for monitorType in MonitorType.allCases {
@@ -69,32 +69,35 @@ defaultConfig() -> RedEyeConfig {
 
             // Set default enabled states and parameters based on existing AppDelegate logic
             switch monitorType {
-            case .hotkeyManager:
-                // HotkeyManager itself (text capture part) is implicitly always "running" if app is on.
-                // Its isHotkeyUiEnabled was about the *panel*. This is now in GeneralAppSettings.
-                // So, for the monitor itself, it's effectively always enabled.
-                // We'll use its `isEnabled` to mean "is the hotkey registration active".
-                defaultIsEnabled = true // Assume hotkey registration should be active by default
-            case .inputMonitorManager:
-                defaultIsEnabled = false // Was `inputMonitorManager?.isEnabled = false`
-            case .appActivationMonitor:
-                defaultIsEnabled = false // Was `appActivationMonitor?.isEnabled = false`
-                // Browser URL capture toggle will be a parameter
-                defaultParams = ["enableBrowserURLCapture": .bool(false)] // Was `appActivationMonitor?.isEnabledBrowserURLCapture = false`
-            case .fsEventMonitorManager:
-                defaultIsEnabled = false // Was `fsEventMonitorManager?.isEnabled = false`
-                // Default paths for FSEvents (e.g., Documents, Downloads)
-                // These would be loaded by FSEventMonitorManager itself if its parameter is nil/empty.
-                // Or we can set an empty array to mean "use internal defaults".
-                defaultParams = ["paths": .array([])] // Let FSEMM use its internal defaults if paths is empty
-            case .keyboardMonitorManager:
-                defaultIsEnabled = true // Was `keyboardMonitorManager?.isEnabled = true`
+                case .hotkeyManager:
+                    // HotkeyManager itself (text capture part) is implicitly always "running" if app is on.
+                    // Its isHotkeyUiEnabled was about the *panel*. This is now in GeneralAppSettings.
+                    // So, for the monitor itself, it's effectively always enabled.
+                    // We'll use its `isEnabled` to mean "is the hotkey registration active".
+                    defaultIsEnabled = true // Assume hotkey registration should be active by default
+                case .inputMonitorManager:
+                    defaultIsEnabled = false // Was `inputMonitorManager?.isEnabled = false`
+                case .appActivationMonitor:
+                    defaultIsEnabled = false // Was `appActivationMonitor?.isEnabled = false`
+                    // Browser URL capture toggle will be a parameter
+                    defaultParams = ["enableBrowserURLCapture": .bool(false)] // Was `appActivationMonitor?.isEnabledBrowserURLCapture = false`
+                case .fsEventMonitorManager:
+                    defaultIsEnabled = false // Was `fsEventMonitorManager?.isEnabled = false`
+                    // Default paths for FSEvents (e.g., Documents, Downloads)
+                    // These would be loaded by FSEventMonitorManager itself if its parameter is nil/empty.
+                    // Or we can set an empty array to mean "use internal defaults".
+                    defaultParams = ["paths": .array([])] // Let FSEMM use its internal defaults if paths is empty
+                case .keyboardMonitorManager:
+                    defaultIsEnabled = true // Was `keyboardMonitorManager?.isEnabled = true`
             }
             defaultMonitorSettings[monitorType.rawValue] = MonitorSpecificConfig(isEnabled: defaultIsEnabled, parameters: defaultParams)
         }
 
         let defaultGeneralSettings = GeneralAppSettings(
-            showPluginPanelOnHotkeyCapture: false // Was `hotkeyManager?.isHotkeyUiEnabled = false`
+            showPluginPanelOnHotkeyCapture: false, // Was `hotkeyManager?.isHotkeyUiEnabled = false`
+            logLevel: nil // Let RedEyeLogger decide its initial default (e.g., .debug for DEBUG, .info for Release)
+                          // Alternatively, set a specific default like .info:
+                          // logLevel: .info
         )
         
         return RedEyeConfig(
