@@ -1,3 +1,63 @@
+# RedEye Release Notes
+
+## Version 0.4.0 (Codename: "Configurator Prime") 
+**Release Date:** May 21, 2025
+
+Version 0.4.0 marks a significant step towards making RedEye a more mature, configurable, and robust sensorium. The headline feature is the introduction of a comprehensive **Configuration System**, allowing users and external agents to tailor RedEye's behavior extensively. This version also includes major internal refactoring for improved code quality and maintainability, and an enhanced logging system.
+
+### ✨ New Features & Enhancements
+
+*   **Comprehensive Configuration System:**
+    *   **File-Based Configuration:** RedEye now loads its settings from a JSON file located at `~/Library/Application Support/RedEye/config.json`. This file is automatically created with sensible defaults on first launch if it doesn't exist.
+    *   Users can configure:
+        *   Which event monitors are enabled (e.g., Keyboard, File System, Application Activation).
+        *   Specific parameters for monitors (e.g., paths for File System event monitoring, enabling experimental Safari URL capture).
+        *   General application settings (e.g., whether the plugin UI panel appears on hotkey text capture).
+        *   Application-wide logging verbosity (`logLevel`).
+    *   **IPC for Runtime Configuration:** External agents can now interact with RedEye via WebSocket IPC commands to:
+        *   Retrieve the current full configuration (`getConfig`).
+        *   Get settings for all or specific monitors (`getMonitorSettings`, `getMonitorSetting`).
+        *   Enable/disable monitors (`setMonitorEnabled`).
+        *   Set parameters for specific monitors (`setMonitorParameters`).
+        *   Get/set general application settings (`getGeneralSettings`, `setGeneralSettings`).
+        *   Query RedEye's capabilities (`getCapabilities`).
+        *   Reset the configuration to factory defaults (`resetConfigToDefaults`).
+    *   Changes made via IPC are persisted back to `config.json`.
+*   **Enhanced Logging System:**
+    *   Introduced distinct log levels (`fault`, `error`, `warning`, `info`, `debug`, `trace`).
+    *   The global logging verbosity can now be set in `config.json` via the `generalSettings.logLevel` key, or updated via IPC.
+    *   Log messages now automatically include call site information (file, line number, function name) for easier debugging.
+    *   Internal logging practices have been standardized for cleaner and more context-rich output, visible in macOS Console.app.
+*   **Improved IPC Command Structure:**
+    *   The IPC protocol has been expanded with new actions focused on configuration management.
+    *   Responses to IPC commands are now more structured, including `commandId` (echoed from request), `status` ("success" or "error"), an optional `message`, and a `data` payload for getter commands.
+
+### 🛠️ Refactoring & Internal Improvements (Primarily for Developers)
+
+*   **`AppCoordinator` Introduced:** Application component initialization and lifecycle management have been centralized into a new `AppCoordinator` class, significantly simplifying `AppDelegate`.
+*   **`TextCaptureService` Decoupled:** The logic for capturing selected text using Accessibility APIs has been extracted from `HotkeyManager` into a dedicated `TextCaptureService` for better separation of concerns and testability.
+*   **`BaseMonitorManager` & Standardized Monitor Architecture:**
+    *   A new `BaseMonitorManager` abstract class, along with `MonitorLifecycleManaging` and `MonitorConfigurable` protocols, has been introduced.
+    *   All event monitor managers (Keyboard, File System, App Activation, etc.) now inherit from this base class, standardizing how they consume configuration, manage their `isEnabled` state, and handle their `start`/`stop` lifecycle.
+*   **`Loggable` Protocol:** A new protocol for cleaner, instance-based logging, adopted by major components.
+*   **Project Documentation Structure:** All project documentation (PRD, Roadmap, Architecture, API References, Guides) is now managed under a unified `/docs` directory within the Git repository.
+
+### 🐛 Bug Fixes
+*   (If any specific bugs from v0.3 were addressed as part of the refactoring, list them here. For this exercise, we'll assume no explicit bug fixes were targeted outside of the refactoring benefits.)
+*   Improved stability and predictability of monitor activation due to centralized configuration.
+
+### ❗ Known Issues & Limitations
+*   **No Live Configuration Reload (for some settings):** While IPC commands can change configuration live (and it's persisted), and log level changes are immediate, changes to monitor parameters (like FSEvent paths) or enabling/disabling monitors via direct `config.json` file edit typically require an application restart for the monitors to fully reconfigure and apply the new settings. Live reloading for all settings is a future enhancement.
+*   **Experimental Safari URL Capture:** The feature to capture Safari's URL/Title via `appActivationMonitor` (if enabled in config) remains experimental and is often blocked by macOS TCC/Automation permission issues, which may require manual intervention or may not work reliably on all systems.
+*   **Server-Side Event Filtering:** This feature, originally planned for v0.4, has been deferred to a future version to prioritize the foundational configuration system.
+
+### 📝 Upgrading
+*   If you have an existing `config.json` from a pre-0.4 experimental build, it's recommended to back it up and let RedEye 0.4.0 generate a new one with the updated schema, then re-apply your customizations. The `schemaVersion` is now "1.0".
+
+### 🙏 Thanks
+*   Thanks to the community for feedback and to the developers for their hard work on this significant update!
+
+---
 ## v0.3
 **Release Date:** May 14, 2025
 

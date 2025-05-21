@@ -1,166 +1,198 @@
-**Version:** 0.4.0 (Phase 1.A - Configuration System Implemented)
-**Last Updated:** May 20, 2025 
+# RedEye Technical Architecture Overview (v0.4)
+
+**Version:** 0.4.0 
+**Last Updated:** May 21, 2025 
 
 ### 1. Introduction
 
-This document provides an overview of the technical architecture of RedEye as of version 0.4.0, focusing on the enhancements introduced in this development cycle. RedEye continues its evolution as a lightweight macOS menu bar "sensorium" application designed to capture user gestures and system events, communicating them via IPC (WebSockets) to external 'Agent' applications.
+This document provides an overview of the technical architecture of RedEye as of version 0.4.0. RedEye is a lightweight macOS menu bar "sensorium" application designed to capture a wide array of user gestures and system events, communicating them via IPC (WebSockets) to external 'Agent' applications.
 
-Following v0.3, which expanded System Event capture and refactored internal event/IPC handling, **v0.4.0 (Phase 1.A) has focused on maturing RedEye by implementing the first phase of a robust Configuration System.** This allows RedEye's behavior (active monitors, monitor parameters) to be configured via a JSON file (`~/.redeye/config.json`) and runtime IPC commands.
+Version 0.3 expanded System Event capture and refactored internal event/IPC handling. **Version 0.4.0 has significantly matured RedEye by implementing a robust Configuration System, further improving code quality through major refactoring (AppCoordinator, TextCaptureService), and enhancing the developer experience with an improved logging system.**
 
-Key architectural changes in this phase include:
-*   Introduction of a central **`ConfigurationManager`** responsible for loading, managing, and persisting application settings.
-*   Definition of a structured **`RedEyeConfig`** model for all configurable aspects.
-*   Implementation of a **`BaseMonitorManager`** class and associated `MonitorLifecycleManaging` and `MonitorConfigurable` protocols to standardize how event monitor managers consume configuration and manage their lifecycle.
-*   Refactoring of all existing event monitor managers to inherit from `BaseMonitorManager`.
-*   Expansion of the **IPC command set** handled by `IPCCommandHandler` to include configuration-related actions (get/set monitor states, parameters, capabilities) with responses sent back to clients.
-*   Updates to `WebSocketServerManager` to facilitate these request-response IPC interactions.
-
-This phase lays a strong foundation for a highly configurable and robust sensorium as envisioned for v0.4 and beyond.
-
-### 2. Core Components & Structure (Updated for v0.4.0)
-
-RedEye remains a Swift-based macOS menu bar application.
-
-**Key Architectural Changes in v0.4.0 (Phase 1.A):**
+**Key Architectural Achievements in v0.4.0:**
 
 *   **Configuration System:**
-    *   **`ConfigurationManager`:** New central component. Manages `RedEyeConfig` loaded from `~/.redeye/config.json`. Creates this file with defaults if it doesn't exist. Provides methods for other components to access configuration and for IPC to modify settings at runtime. Changes made via IPC are persisted back to the file.
-    *   **`RedEyeConfig.swift`:** Defines the `Codable` structs for configuration:
-        *   `RedEyeConfig`: Top-level structure (schema version, monitor settings, general app settings).
-        *   `MonitorType` (enum): Identifies configurable monitor managers.
-        *   `MonitorSpecificConfig`: Holds `isEnabled` status and `parameters` (e.g., paths for FSEvents, `enableBrowserURLCapture` for AppActivation) for each monitor type.
-        *   `GeneralAppSettings`: Holds global settings (e.g., `showPluginPanelOnHotkeyCapture`).
-*   **Managerial Abstractions:**
-    *   **`MonitorProtocols.swift`:**
-        *   `MonitorLifecycleManaging`: Protocol for `start()` and `stop()` methods.
-        *   `MonitorConfigurable`: Protocol for applying configuration and querying active state.
-    *   **`BaseMonitorManager.swift`:** New abstract base class for event monitor managers.
-        *   Implements `MonitorLifecycleManaging` and `MonitorConfigurable`.
-        *   Holds references to `ConfigurationManager` and optionally `EventBus`.
-        *   Handles common logic for fetching `MonitorSpecificConfig` and `GeneralAppSettings`.
-        *   Orchestrates calling `startMonitoring() -> Bool` (overridden by subclasses) based on `isEnabled` from config, and manages the `isCurrentlyActive` state.
-        *   Provides `stop()` which calls the subclass's `stopMonitoring()` override.
-*   **Refactored Event Monitor Managers:** All existing event monitor managers (`AppActivationMonitor`, `FSEventMonitorManager`, `KeyboardMonitorManager`, `InputMonitorManager`, `HotkeyManager`) now:
-    *   Inherit from `BaseMonitorManager`.
-    *   Receive `ConfigurationManager` (and `EventBus` where applicable) in their `init` and pass them to `super.init()`.
-    *   Override `startMonitoring() -> Bool` to implement their specific setup logic and report success/failure.
-    *   Override `stopMonitoring()` for specific cleanup.
-    *   Rely on `BaseMonitorManager` for configuration access and primary `isEnabled` checks.
-    *   Removed their previous standalone `isEnabled` properties and direct developer toggles.
+    *   A central **`ConfigurationManager`** now manages application settings loaded from `~/.redeye/config.json`, handling defaults and persistence.
+    *   A structured **`RedEyeConfig`** model defines all configurable aspects, including monitor enablement, parameters, general app settings, and logging verbosity.
+    *   IPC commands allow runtime querying and modification of the configuration by Agents.
+*   **Core Component Refactoring:**
+    *   **`AppCoordinator`:** Introduced to handle the initialization and lifecycle management of core managers, significantly simplifying `AppDelegate`.
+    *   **`TextCaptureService`:** Accessibility API logic for capturing selected text has been decoupled from `HotkeyManager` into this dedicated service.
+*   **Managerial Abstractions & Standardization:**
+    *   **`BaseMonitorManager`** class and `MonitorLifecycleManaging`, `MonitorConfigurable` protocols standardize how event monitor managers consume configuration and manage their lifecycle (`start`/`stop`). All event monitors now inherit from `BaseMonitorManager`.
+*   **Enhanced Logging System:**
+    *   A new **`Loggable` protocol** and instance-based loggers (`self.info(...)`) provide cleaner, context-aware logging with reduced boilerplate.
+    *   Log levels (`fault`, `error`, `warning`, `info`, `debug`, `trace`) are defined, and the application's global log verbosity (`RedEyeLogger.currentLevel`) can now be set via `config.json`.
 *   **IPC Enhancements:**
-    *   **`IPCCommandHandler`:** Now takes `ConfigurationManager` in its `init`. Handles new configuration-related `IPCAction`s. Returns a `String?` (JSON response) to `WebSocketServerManager`.
-    *   **`IPCCommand.swift`:** `IPCAction` enum expanded with cases like `getConfig`, `setMonitorEnabled`, `getCapabilities`, etc. New payload structs defined.
-    *   **`WebSocketServerManager`:** Its `onText` handler now awaits the response from `IPCCommandHandler` and sends it back to the originating client, enabling request-response for config commands.
+    *   The IPC command set handled by `IPCCommandHandler` was expanded for comprehensive configuration management.
+    *   `WebSocketServerManager` now supports request-response for these commands.
+*   **Documentation Structure:** All project documentation (PRDs, Roadmaps, Architecture, User/Developer Guides, API References) is now managed under a `/docs` directory within the Git repository.
 
-**App Folder:**
-*   **`AppDelegate.swift`**:
-    *   Instantiates `ConfigurationManager` early.
-    *   Instantiates `IPCCommandHandler` with `ConfigurationManager`.
-    *   Passes `ConfigurationManager` (and `EventBus` where needed) to monitor managers during their initialization.
-    *   Calls the `start()` (from `BaseMonitorManager`) method on each monitor manager during `applicationDidFinishLaunching`.
-    *   Calls `stop()` on monitor managers during `applicationWillTerminate`.
-    *   No longer directly sets `isEnabled` flags on managers.
-*   **`main.swift`**: (No change) Entry point.
+This version focuses on making RedEye more configurable, maintainable, and robust, laying a strong foundation for future feature development.
 
-**Config Folder (New):**
-*   **`RedEyeConfig.swift`**: Defines the `Codable` configuration structures (`RedEyeConfig`, `MonitorType`, `MonitorSpecificConfig`, `GeneralAppSettings`) and the `defaultConfig()` factory.
-*   **`ConfigurationManager.swift`**: Implements `ConfigurationManaging` protocol. Handles file I/O for `~/.redeye/config.json`, default creation, access, and modification of `RedEyeConfig`.
+### 2. Core Components & Structure (v0.4.0)
 
-**Events Folder:**
-*   **`RedEyeEvent.swift`**: `RedEyeEventType` now conforms to `CaseIterable`. (No other direct changes in this phase).
-*   **`EventBus.swift`**: (No change).
-*   **`MainEventBus.swift`**: (No change).
+RedEye is a Swift-based macOS menu bar application.
 
-**IPC Folder:**
-*   **`IPCCommand.swift`**: `IPCAction` enum significantly expanded for configuration commands. New `Codable` payload structs for these commands (e.g., `MonitorTypePayload`, `SetMonitorEnabledPayload`). Defines `IPCResponseWrapper` for standardizing response structure.
+**Overall Application Flow Orchestration:**
+*   **`AppDelegate`**: Minimalist. Handles `NSApplication` lifecycle callbacks and delegates core application setup and teardown to `AppCoordinator`. Manages the status bar item and initial permission requests (e.g., Accessibility).
+*   **`AppCoordinator`**: Central class responsible for instantiating, wiring together, and managing the lifecycle (`start`/`stop`) of all core services and managers (e.g., `ConfigurationManager`, `EventBus`, `IPCCommandHandler`, `WebSocketServerManager`, all monitor managers, `TextCaptureService`).
+
+**Key Components:**
+
+**Config Folder (`RedEye/Config/`):**
+*   **`RedEyeConfig.swift`**: Defines `Codable` data structures for application configuration:
+    *   `RedEyeConfig`: Top-level struct (schema version, monitor settings, general app settings).
+    *   `MonitorType` (enum): Identifies all configurable monitor managers (e.g., `keyboardMonitorManager`, `fsEventMonitorManager`).
+    *   `MonitorSpecificConfig`: Holds `isEnabled` (Bool) and `parameters` (`[String: JSONValue]?`) for each monitor.
+    *   `GeneralAppSettings`: Holds global settings like `showPluginPanelOnHotkeyCapture` (Bool) and `logLevel` (`RedEyeLogger.LogLevel?`).
+    *   Includes `RedEyeConfig.defaultConfig()` for generating factory defaults.
+*   **`ConfigurationManager.swift`**:
+    *   Implements `ConfigurationManaging` protocol.
+    *   Manages loading `RedEyeConfig` from `~/.redeye/config.json`.
+    *   Creates `config.json` with defaults if missing or corrupt.
+    *   Provides thread-safe methods for accessing and modifying configuration.
+    *   Persists runtime configuration changes (e.g., from IPC commands) back to `config.json`.
+    *   Sets `RedEyeLogger.currentLevel` based on loaded configuration.
+
+**Events Folder (`RedEye/Events/`):**
+*   **`RedEyeEvent.swift`**: Defines `RedEyeEvent` (struct) and `RedEyeEventType` (enum, now `CaseIterable`).
+*   **`EventBus.swift`**: Defines `EventBus` and `EventBusSubscriber` protocols.
+*   **`MainEventBus.swift`**: Concrete `EventBus` implementation for decoupled event propagation.
+
+**IPC Folder (`RedEye/IPC/`):**
+*   **`IPCCommand.swift`**:
+    *   `IPCReceivedCommand`: Structure for incoming client commands.
+    *   `IPCAction` (enum): Significantly expanded with actions for configuration management (e.g., `getConfig`, `setMonitorEnabled`, `getCapabilities`, `resetConfigToDefaults`).
+    *   Defines various `Codable` payload structs for specific commands.
+    *   `IPCResponseWrapper`: Generic struct to standardize the JSON format of responses to clients (`status`, `message`, `data`, `commandId`).
+    *   `JSONValue` enum for flexible JSON payloads.
 *   **`IPCCommandHandler.swift`**:
-    *   Modified `init` to accept `ConfigurationManager`.
-    *   `handleRawCommand` now returns `String?` (JSON response).
-    *   Implements handlers for new configuration `IPCAction`s, interacting with `ConfigurationManager`.
-    *   Uses helper methods to decode payloads and create structured JSON responses (ACK/NACK/data).
+    *   Initialized with `ConfigurationManager`.
+    *   Parses raw commands, routes based on `IPCAction`.
+    *   Handles configuration commands by interacting with `ConfigurationManager`.
+    *   Generates JSON response strings (success/error/data) for `WebSocketServerManager` to send back.
 
-**Managers Folder:**
-*   **`MonitorProtocols.swift` (New File):** Defines `MonitorLifecycleManaging` and `MonitorConfigurable` protocols.
-*   **`BaseMonitorManager.swift` (New File):** Abstract base class implementing `MonitorLifecycleManaging` and `MonitorConfigurable`. Provides common configuration handling and lifecycle orchestration for monitor managers.
-*   **Event Monitor Managers (`AppActivationMonitor`, `FSEventMonitorManager`, `HotkeyManager`, `InputMonitorManager`, `KeyboardMonitorManager`):**
+**Managers Folder (`RedEye/Managers/`):**
+*   **`MonitorProtocols.swift`**:
+    *   `MonitorLifecycleManaging`: Protocol defining `start()` and `stop()` methods.
+    *   `MonitorConfigurable`: Protocol defining `monitorType`, `applyConfiguration(...)`, and `isCurrentlyActive`.
+*   **`BaseMonitorManager.swift`**:
+    *   Abstract base class for all event monitor managers.
+    *   Implements `MonitorLifecycleManaging`, `MonitorConfigurable`, and `Loggable`.
+    *   Handles common tasks: fetching configuration from `ConfigurationManager`, checking `isEnabled` status, calling subclass overrides for specific monitoring logic (`startMonitoring() -> Bool`, `stopMonitoring()`).
+    *   Manages `isCurrentlyActive` state based on configuration and subclass startup success.
+    *   Provides an `instanceLogger` via `Loggable` conformance.
+*   **Event Monitor Managers** (e.g., `AppActivationMonitor.swift`, `FSEventMonitorManager.swift`, `HotkeyManager.swift`, `InputMonitorManager.swift`, `KeyboardMonitorManager.swift`):
     *   All now inherit from `BaseMonitorManager`.
-    *   Removed internal `isEnabled` properties; behavior now driven by configuration fetched via `BaseMonitorManager`.
-    *   `init` methods updated to accept `ConfigurationManager` (and other dependencies) and call `super.init()`.
-    *   Implement `override func startMonitoring() -> Bool` and `override func stopMonitoring()`.
-*   **`PluginManager.swift`**: (No architectural changes in this phase).
-*   **`UIManager.swift`**: (No architectural changes in this phase, but `HotkeyManager` which uses it is refactored).
+    *   Receive `ConfigurationManager` (and `EventBus` where needed) via `super.init()`.
+    *   Override `logCategoryForInstance: String` for specific logging.
+    *   Implement `override func startMonitoring() -> Bool` for their specific setup (e.g., creating event taps, registering observers) and report success/failure.
+    *   Implement `override func stopMonitoring()` for specific cleanup.
+    *   Use `self.info(...)`, `self.debug(...)` etc., for logging, leveraging the `Loggable` protocol.
+*   **`PluginManager.swift`**: (No major architectural changes in v0.4).
+*   **`UIManager.swift`**: (No major architectural changes in v0.4). `HotkeyManager` still uses it.
 *   **`WebSocketServerManager.swift`**:
-    *   Its `onText` handler for incoming client messages now awaits a response string from `IPCCommandHandler.handleRawCommand()` and sends this response back to the client using `try await ws.send()`.
+    *   Initialized with `EventBus` and `IPCCommandHandler`.
+    *   Subscribes to `EventBus` to broadcast `RedEyeEvent`s.
+    *   For incoming client messages (`onText`):
+        *   Passes raw command string to `IPCCommandHandler.handleRawCommand()`.
+        *   Receives a response string (JSON) from `IPCCommandHandler`.
+        *   Sends this response string back to the originating WebSocket client using `try await ws.send()`.
 
-**(UI Folder, Utilities Folder sections remain largely the same as v0.3 unless indirectly affected.)**
+**Services Folder (`RedEye/Services/` - New):**
+*   **`TextCaptureService.swift`**:
+    *   New service dedicated to capturing selected text using macOS Accessibility APIs.
+    *   Used by `HotkeyManager` to decouple text-capturing logic.
+    *   Returns a `TextCaptureResult` struct (includes text, app info, and potential errors via `TextCaptureError` enum).
+    *   Conforms to `Loggable`.
 
-### 3. Key Workflows (Updated for v0.4.0)
+**Utilities Folder (`RedEye/Utilities/`):**
+*   **`RedEyeLogger.swift`**:
+    *   Defines `Loggable` protocol.
+    *   Defines `RedEyeLogger.LogLevel` enum (`fault` to `trace`), which is `Codable`.
+    *   `RedEyeLogger.currentLevel` (static var) controls global log verbosity, settable by `ConfigurationManager` from `config.json`.
+    *   Static logging methods (`RedEyeLogger.info()`, etc.) check `currentLevel` and include file/line/function context.
+    *   Extension methods for `Loggable` (`self.info()`, etc.) use an `instanceLogger` (configured with a specific category per type) and also check `currentLevel` and add context.
+    *   Removed old `isVerboseLoggingEnabled` flag.
 
-1.  **Application Startup:**
-    *   `AppDelegate.applicationDidFinishLaunching`:
-        1.  Initializes `ConfigurationManager`. This involves loading `~/.redeye/config.json` or creating it with defaults. `currentConfig` is now populated.
-        2.  Initializes `EventBus`.
-        3.  Initializes `IPCCommandHandler` with `ConfigurationManager`.
-        4.  Initializes all other managers, including event monitor managers. Monitor managers (now `BaseMonitorManager` subclasses) are provided with `ConfigurationManager` (and `EventBus` if needed).
-        5.  `AppDelegate` calls `start()` on each monitor manager.
-        6.  Inside each monitor's `start()` (from `BaseMonitorManager`):
-            *   The monitor's specific configuration (`MonitorSpecificConfig`) is fetched from `ConfigurationManager`.
-            *   If `MonitorSpecificConfig.isEnabled` is true, the base manager calls the subclass's overridden `startMonitoring() -> Bool` method.
-            *   The subclass attempts its specific setup (e.g., creating event taps, registering observers). If successful, it returns `true`; `BaseMonitorManager` then sets `isCurrentlyActive = true`. If it fails, it returns `false`; `BaseMonitorManager` sets `isCurrentlyActive = false` and ensures `stopMonitoring()` is called for cleanup.
-    *   `WebSocketServerManager` starts its server and subscribes to `EventBus`.
+### 3. Key Workflows (v0.4.0)
+
+1.  **Application Startup (Orchestrated by `AppCoordinator`):**
+    1.  `AppDelegate.applicationDidFinishLaunching` creates and starts `AppCoordinator`.
+    2.  `AppCoordinator.init()`:
+        *   Instantiates `ConfigurationManager`, which loads `config.json` or creates defaults. `RedEyeLogger.currentLevel` is set from this config.
+        *   Instantiates `EventBus`, `IPCCommandHandler` (with `ConfigurationManager`), `TextCaptureService`.
+        *   Instantiates all other managers, including monitor managers (passing `ConfigurationManager`, `EventBus`, and other specific dependencies like `UIManager` or `TextCaptureService`).
+    3.  `AppCoordinator.start()`:
+        *   Calls `startServer()` on `WebSocketServerManager`.
+        *   Calls `start()` on each monitor manager instance (which are `BaseMonitorManager` subclasses).
+        *   Each monitor manager's `BaseMonitorManager.start()` sequence:
+            *   Fetches its `MonitorSpecificConfig` and `GeneralAppSettings` from `ConfigurationManager`.
+            *   Calls `applyConfiguration()` (sets `currentMonitorConfig`, returns if it *should* activate based on `isEnabled`).
+            *   If configuration allows activation, calls the subclass's overridden `startMonitoring() -> Bool`.
+            *   If subclass `startMonitoring()` returns `true`, `isCurrentlyActive` is set to `true`. If `false`, `isCurrentlyActive` is `false` and `stopMonitoring()` is called for cleanup.
 
 2.  **Event Capturing & Broadcasting:**
-    *   This flow is fundamentally the same as v0.3, but a monitor will only capture and publish events if it was successfully started based on its configuration (i.e., `isCurrentlyActive` is true).
-    *   Example: `KeyboardMonitorManager.handleEventTap` first checks `self.isCurrentlyActive` before processing a keyboard event.
+    *   An active monitor manager (where `isCurrentlyActive` is `true`) captures a native macOS event.
+    *   It creates a `RedEyeEvent` object.
+    *   It calls `self.eventBus?.publish(event: anEvent)`.
+    *   `MainEventBus` dispatches the event to subscribers (e.g., `WebSocketServerManager`).
+    *   `WebSocketServerManager.handleEvent` serializes and broadcasts the event to connected clients.
 
-3.  **IPC Command Reception & Response (Configuration Example - `setMonitorEnabled`):**
-    1.  An external WebSocket client sends a JSON command:
-        `{ "action": "setMonitorEnabled", "commandId": "cmd123", "payload": { "monitorType": "keyboardMonitorManager", "isEnabled": false } }`
-    2.  `WebSocketServerManager.onText` receives the raw string.
-    3.  It calls `await ipcCommandHandler.handleRawCommand(commandString, clientID)`.
+3.  **IPC Command Processing (e.g., `setMonitorEnabled`):**
+    1.  Agent sends JSON command: `{"action": "setMonitorEnabled", "payload": {"monitorType": "...", "isEnabled": ...}}`.
+    2.  `WebSocketServerManager.onText` receives it.
+    3.  Calls `await ipcCommandHandler.handleRawCommand(...)`.
     4.  `IPCCommandHandler`:
-        *   Decodes the string to `IPCReceivedCommand`.
-        *   Identifies `action` as `.setMonitorEnabled`.
-        *   Decodes `payload` into `SetMonitorEnabledPayload`.
-        *   Calls `try configManager.setMonitorEnabled(type: .keyboardMonitorManager, isEnabled: false)`.
+        *   Decodes command and payload.
+        *   Identifies action, calls `configManager.setMonitorEnabled(...)`.
     5.  `ConfigurationManager`:
-        *   Updates `currentConfig.monitorSettings["keyboardMonitorManager"]?.isEnabled = false`.
-        *   Calls `performSaveConfiguration` to persist the updated `RedEyeConfig` to `~/.redeye/config.json`.
-    6.  `IPCCommandHandler` (if `configManager` call succeeds):
-        *   Creates a success JSON response string, e.g.,
-          `{ "commandId": "cmd123", "status": "success", "message": "Monitor 'keyboardMonitorManager' enabled state set to false." }`
-    7.  `WebSocketServerManager`:
-        *   Receives the response string from `handleRawCommand`.
-        *   Calls `try await ws.send(responseString)` to send the JSON response back to the specific client.
+        *   Updates its in-memory `currentConfig`.
+        *   Saves `currentConfig` to `~/.redeye/config.json`.
+        *   *(Future: Could trigger a notification for live config updates within RedEye).*
+    6.  `IPCCommandHandler` creates a JSON success/error response string.
+    7.  `WebSocketServerManager` sends this response string back to the client.
+
+4.  **Text Capture Flow (e.g., via Hotkey):**
+    1.  User presses ⌘⇧C. `HotkeyManager`'s `KeyboardShortcuts` handler fires.
+    2.  Handler checks if `HotkeyManager` `isCurrentlyActive`.
+    3.  Calls `textCaptureService.captureSelectedTextFromFrontmostApp()`.
+    4.  `TextCaptureService` uses Accessibility API to get selected text and source app info, returning a `TextCaptureResult`.
+    5.  `HotkeyManager` creates a `.textSelection` `RedEyeEvent` using data from `TextCaptureResult`.
+    6.  Publishes event to `EventBus`.
+    7.  If `generalSettings.showPluginPanelOnHotkeyCapture` is true (from `ConfigurationManager`), calls `uiManager.showPluginActionsPanel(...)`.
 
 ### 4. Configuration System (`config.json`)
 
-*   **Location:** `~/Library/Application Support/RedEye/config.json`
-    *   The `RedEye` subdirectory and `config.json` file are created automatically by `ConfigurationManager` with default settings if they do not exist.
-*   **Format:** JSON.
-*   **Structure:** Defined by the `RedEyeConfig`, `MonitorSpecificConfig`, and `GeneralAppSettings` Swift structs.
-    *   `schemaVersion` (String): Version of the configuration schema.
-    *   `monitorSettings` (Dictionary): Keys are `MonitorType.rawValue` strings (e.g., "keyboardMonitorManager"). Values are `MonitorSpecificConfig` objects.
-        *   `MonitorSpecificConfig`: Contains `type` (String, redundant but for clarity in JSON), `isEnabled` (Bool), and `parameters` (Dictionary `[String: JSONValue]`, e.g., `{"paths": ["~/Documents"]}`).
-    *   `generalSettings` (Object): Contains global settings like `showPluginPanelOnHotkeyCapture` (Bool).
-*   **Management:**
-    *   Loaded at startup by `ConfigurationManager`.
-    *   Can be modified at runtime via IPC commands. Changes are persisted to the file.
-    *   Provides the single source of truth for configurable application behavior.
+*   **Location:** `~/Library/Application Support/RedEye/config.json`. Automatically created with defaults if missing.
+*   **Format:** JSON, defined by `RedEyeConfig` Swift struct.
+*   **Key Contents:** `schemaVersion`, `monitorSettings` (per-monitor `isEnabled`, `parameters`), `generalSettings` (`showPluginPanelOnHotkeyCapture`, `logLevel`).
+*   **Management:** Loaded/saved by `ConfigurationManager`. Modifiable via IPC. Changes require app restart for monitors to pick up, unless live reloading is implemented. IPC-driven log level changes are immediate.
 
 ### 5. External Dependencies
-    * (No change from v0.3 for this feature - WebSocketKit, KeyboardShortcuts, CoreServices, ApplicationServices, etc.)
+*   **WebSocketKit:** For WebSocket server implementation.
+*   **KeyboardShortcuts:** For global hotkey management.
+*   **macOS Frameworks:** AppKit, Foundation, CoreServices (FSEvents), ApplicationServices (Accessibility, CGEventTaps).
 
 ### 6. Permissions Required
-    * (No new permissions directly required by the configuration system itself. Existing permissions for monitors still apply.)
+*   **Accessibility:** For text capture.
+*   **Input Monitoring:** For global keyboard events (if `KeyboardMonitorManager` is enabled).
+*   **Full Disk Access (Potentially):** For `FSEventMonitorManager` if watching restricted paths.
+*   **Automation (Safari - Experimental):** If `enableBrowserURLCapture` is used.
 
 ### 7. Build & Development
-*   Unit tests for `ConfigurationManager` have been implemented to verify file operations, default generation, and get/set logic.
-*   Monitor managers now inherit from `BaseMonitorManager`, simplifying their structure and standardizing config access.
+*   Xcode project (`RedEye.xcodeproj`).
+*   Swift Package Manager for `WebSocketKit` and `KeyboardShortcuts`.
+*   Unit tests for `ConfigurationManager` and `MainEventBus`.
+*   Logging managed by `RedEyeLogger` (wrapper around `os.Logger`), with configurable levels.
+*   All documentation now stored in `/docs` directory in the repository.
 
-### 8. Future Considerations & Potential Refinements (Post v0.4 Phase 1.A)
-*   **Live Configuration Reloading:** Notify managers if the config file is changed externally or if an IPC command modifies a part of the config they depend on, so they can re-read and apply changes without an app restart.
-*   **Configuration UI:** Develop a user interface for modifying settings (potentially using `sindresorhus/Settings`).
-*   **Hierarchical Configuration:** Expand `ConfigurationManager` to merge settings from multiple sources (e.g., global defaults, user file, agent-provided overrides).
-*   **Schema Migration:** Implement logic in `ConfigurationManager` to handle migration of `config.json` if `schemaVersion` changes.
-*   **Refined IPC Error Codes:** Standardize error codes within IPC responses for better client-side error handling.
+### 8. Future Considerations (Beyond v0.4 Initial Release)
+*   **Server-Side Event Filtering for IPC Clients.**
+*   **Live Configuration Reloading:** Allowing monitors and services to react to configuration changes (from file or IPC) without an app restart.
+*   **Advanced Logging:** More granular per-module log level control at runtime if needed.
+*   **Comprehensive Unit & Integration Testing:** Expand coverage for all components and workflows, potentially with UI test automation for key user interactions.
+*   **Configuration UI:** A settings window for easier configuration management by the user.
+*   **Schema Migration for `config.json`:** Robust handling of changes to the config file structure across versions.
+*   *(Other items from previous architecture docs, e.g., advanced synthetic events, rule engine, remain long-term considerations).*

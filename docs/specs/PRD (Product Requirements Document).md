@@ -1,104 +1,108 @@
-**Version:** 0.4-dev
-**Last Updated:** May 20, 2025
+**Product Requirements Document - RedEye**
 
-### 🧭 Purpose
+**Version:** 0.4 (Partial Completion) 
+**Last Updated:** May 21, 2025
 
+### 🧭 Purpose 
 RedEye is a lightweight macOS menu bar "sensorium" application designed to capture a wide array of user gestures and system events, communicating them via IPC (WebSockets) to external 'Agent' applications.
 
-Following v0.3, which significantly expanded foundational System Event capture and refactored internal event/IPC handling, **v0.4 focuses on maturing RedEye into a highly configurable and robust sensorium.** Key goals include implementing a comprehensive configuration system (file and IPC-based), refining the IPC protocol to be configuration-centric, enabling server-side event filtering for agents, and further improving developer experience through code refactoring, enhanced logging, expanded testing, and dedicated documentation efforts.
-
 ### 🎯 Target User
-
 *   Developers and systems requiring a **highly configurable and efficient component** to capture macOS contextual events and feed them to other applications or complex workflows.
 *   Applications needing a macOS-native agent that can be **dynamically configured at runtime** and provide **introspectable capabilities**.
-*   Users and developers who require **clear documentation** for installation, configuration, development, and IPC integration.
 
 ### ✅ v0.3 Recap (Completed)
-
-Version 0.3 successfully delivered:
 *   New System Event Monitors: File System (`FSEvents`) and Global Keyboard (`CGEventTap`), including permission handling.
 *   Infrastructure Refactoring: Implemented `MainEventBus` (replacing `EventManager`) and `IPCCommandHandler` (decoupling from `WebSocketServerManager`).
 *   Developer Experience: Added `isEnabled` toggles for all event monitors and hotkey UI.
 *   Research: Analysis of Hazel and Hammerspoon documented in `TechScape.md`.
 *   Synthetic Event PoC: Attempted Safari URL capture (experimental, blocked by OS permissions).
 *   Unit Tests: Initial tests for `MainEventBus`.
-*   Updated project documentation (PRD, Roadmap, Architecture, Release Notes).
+*   Updated project documentation (PRD, Roadmap, Architecture, Release Notes for v0.3).
 
-### ራ v0.4 Vision & Scope
+### ራ v0.4 Vision & Scope (Updated Status)
 
-**Primary Goal for v0.4:** Transform RedEye into a more mature, configurable, and well-documented sensorium by implementing a robust configuration system, refining IPC for configuration, enabling server-side event filtering, and enhancing developer quality-of-life through refactoring, logging, testing, and documentation.
+**Primary Goal for v0.4 (Original):** Transform RedEye into a more mature, configurable, and well-documented sensorium by implementing a robust configuration system, refining IPC for configuration, enabling server-side event filtering, and enhancing developer quality-of-life through refactoring, logging, testing, and documentation.
 
-**Key Objectives for v0.4:**
-1.  **Implement Configuration System (Phase 1):** Allow RedEye's behavior (active monitors, monitor parameters) to be configured via static files (e.g., JSON/YAML) and basic runtime IPC commands. **IN PROGRESS - Phase 1.A COMPLETED: Core ConfigurationManager implemented for JSON file loading/saving from ~/.redeye/config.json, default config generation. IPC commands for getting/setting monitor enabled states, parameters, general settings, and retrieving capabilities are functional. Persistence of IPC changes to file is implemented.**
-2.  **Refactor IPC for Configuration:** Shift the primary role of IPC commands from general actions to configuration management, introspection, and filtered event subscription requests. Implement basic ACK/NACK for config commands.
-3.  **Enable Server-Side Event Filtering (Phase 1):** Allow IPC clients (Agents) to request filtered streams of events from RedEye, reducing data transfer.
+**Current Status of v0.4 Goals:**
+*   **Configuration System & IPC Refinements:** Largely **COMPLETED**. RedEye is now highly configurable via file and IPC.
+*   **Server-Side Event Filtering:** **DEFERRED** to a future version.
+*   **Developer Experience & Code Quality (Refactoring, Logging, Testing):** **SIGNIFICANT PROGRESS**. Major refactors (AppCoordinator, TextCaptureService) and logging system overhaul completed. Comprehensive testing expanded for core config, some areas deferred.
+*   **Comprehensive Documentation:** **IN PROGRESS**. IPC Reference drafted, core dev docs updated. User-facing docs (README) improved.
+
+**Key Objectives for v0.4 (Updated Status):**
+1.  **Implement Configuration System (Phase 1):** Allow RedEye's behavior (active monitors, monitor parameters, logging level) to be configured via static files (`~/.redeye/config.json`) and basic runtime IPC commands. **[COMPLETED]**
+2.  **Refactor IPC for Configuration:** Shift the primary role of IPC commands from general actions to configuration management, introspection, and filtered event subscription requests. Implement basic ACK/NACK/Data responses for config commands. **[COMPLETED]**
+3.  **Enable Server-Side Event Filtering (Phase 1):** Allow IPC clients (Agents) to request filtered streams of events from RedEye, reducing data transfer. **[DEFERRED to v0.5+]**
 4.  **Improve Developer Experience & Code Quality:**
-    *   Refactor `AppDelegate` initialization into an `AppCoordinator`.
-    *   Decouple text-fetching logic from `HotkeyManager` into a `TextCaptureService`.
-    *   Enhance logging capabilities (organization, potential for runtime adjustments).
-    *   Expand unit and integration test coverage.
-5.  **Establish Comprehensive Documentation:** Create and maintain documentation for Users (README), Developers (Developer Guide), and Agent/System Integrators (IPC Reference).
+    *   Refactor `AppDelegate` initialization into an `AppCoordinator`. **[COMPLETED]**
+    *   Decouple text-fetching logic from `HotkeyManager` into a `TextCaptureService`. **[COMPLETED]**
+    *   Enhance logging capabilities (organization, runtime adjustments via config, improved context). **[COMPLETED]**
+    *   Expand unit and integration test coverage. **[PARTIALLY COMPLETED - Core config tested. Further expansion deferred.]**
+5.  **Establish Comprehensive Documentation:** Create and maintain documentation for Users (README), Developers (Developer Guide), and Agent/System Integrators (IPC Reference). **[IN PROGRESS - IPC Ref created, Arch updated, README updated. Developer Guide needs focus.]**
 
-### 🔧 Core Features (Focus for v0.4)
+### 🔧 Core Features (Focus for v0.4 - Current State)
 
-1.  **Static File Configuration:** Change status: **[COMPLETED]** RedEye now loads initial settings from ~/.redeye/config.json. If the file is missing, it's created with default values. Configurable items include:
-            - Which event monitors are enabled by default. (Implemented via RedEyeConfig.monitorSettings[monitorType].isEnabled)
-            - Paths for FSEventMonitorManager. (Implemented via RedEyeConfig.monitorSettings[fsEventMonitorType].parameters["paths"])
-            - General app settings like showPluginPanelOnHotkeyCapture. (Implemented via RedEyeConfig.generalSettings)
-        - **IPC for Runtime Configuration & Introspection:** Change status: **[COMPLETED]**
-            - Commands to get/set the enabled state of individual event monitors. (Implemented: getMonitorSetting, setMonitorEnabled)
-            - Commands to get/set observed paths for FSEventMonitorManager (via setMonitorParameters). (Implemented)
-            - Command to retrieve RedEye's current capabilities. (Implemented: getCapabilities)
-            - Command to retrieve current effective configuration (Implemented: getConfig, getMonitorSettings, getGeneralSettings)
-            - Command to reset configuration to defaults. (Implemented: resetConfigToDefaults)
-        - **ConfigurationManager:** Change status: **[COMPLETED]** New component created. Manages loading from ~/.redeye/config.json, applying defaults, providing access to config, handling runtime IPC changes, and persisting them back to the file.
+1.  **Configuration System (Phase 1): [COMPLETED]**
+    *   **Static File Configuration:** RedEye loads initial settings from `~/.redeye/config.json`. Creates with defaults if missing. Configurable items:
+        *   Enabled state of event monitors.
+        *   Parameters for monitors (e.g., paths for `FSEventMonitorManager`, `enableBrowserURLCapture` for `appActivationMonitor`).
+        *   General app settings (e.g., `showPluginPanelOnHotkeyCapture`, `logLevel`).
+    *   **IPC for Runtime Configuration & Introspection:**
+        *   Commands implemented: `getConfig`, `getMonitorSetting(s)`, `setMonitorEnabled`, `getMonitorParameters`, `setMonitorParameters`, `getGeneralSettings`, `setGeneralSettings`, `getCapabilities`, `resetConfigToDefaults`.
+        *   Changes made via IPC are persisted to `config.json`.
+    *   **`ConfigurationManager`:** Central component managing config loading, defaults, access, runtime changes, and persistence.
+    *   **Log Level Configuration:** Global application log level (`RedEyeLogger.currentLevel`) is now configurable via `generalSettings.logLevel` in `config.json` and via IPC through `setGeneralSettings`.
 
-2.  **Refined IPC Protocol (Configuration-Centric):**
-    *   Redefine `IPCAction` enum and associated `IPCCommandHandler` logic to focus on commands like:
-        *   `setConfigValue`, `getConfigValue`
-        *   `setMonitorEnabled`, `getMonitorStatus`
-        *   `setMonitorParameters` (e.g., FSEvent paths)
-        *   `getCapabilities`
-        *   `subscribeWithFilter` (see below)
-    *   Implement basic ACK/NACK responses for critical configuration commands.
-    *   Provide more detailed error reporting for IPC command failures.
+2.  **Refined IPC Protocol (Configuration-Centric): [COMPLETED]**
+    *   `IPCAction` enum and `IPCCommandHandler` logic now primarily focus on configuration and introspection commands.
+    *   Implemented structured JSON responses (status, message, data, commandId) for all new configuration commands.
 
-3.  **Server-Side Event Filtering for IPC (Phase 1):**
-    *   Allow IPC clients (Agents) to specify filters when subscribing to events (e.g., by `RedEyeEventType`, source application for app events, path prefix for FS events).
-    *   `WebSocketServerManager` (or a new `IPCSubscriptionManager`) will apply these filters before sending events to specific clients.
-    *   Requires a new IPC command like `subscribeToEvents(filters: [FilterDescription])`.
+3.  **Server-Side Event Filtering for IPC (Phase 1): [DEFERRED]**
+    *   (Original description remains, but marked as deferred)
 
-4.  **Core Component Refactoring:**
-    *   **`AppCoordinator`:** New class to handle manager initialization and application lifecycle logic, reducing `AppDelegate`'s responsibilities.
-    *   **`TextCaptureService`:** New service to encapsulate Accessibility-based text-fetching logic, used by `HotkeyManager`.
-    *    **BaseMonitorManager**: base class for all event monitor managers to handle configuration.
+4.  **Core Component Refactoring: [COMPLETED]**
+    *   **`AppCoordinator`:** New class handles manager initialization and application lifecycle logic, reducing `AppDelegate`'s responsibilities.
+    *   **`TextCaptureService`:** New service encapsulates Accessibility-based text-fetching logic, used by `HotkeyManager`.
+    *   **`BaseMonitorManager` & Protocols:** Introduced `BaseMonitorManager` (inheriting from `MonitorLifecycleManaging`, `MonitorConfigurable`, `Loggable`) to standardize monitor configuration handling and lifecycle. All event monitors refactored.
 
-5.  **Logging Enhancements (Phase 1):**
-    *   Standardize logger instantiation (e.g., via a `Loggable` protocol or helper).
-    *   Improve organization of logging categories and levels.
-    *   (Investigate: Runtime log level adjustment capabilities).
+5.  **Logging Enhancements (Phase 1): [COMPLETED]**
+    *   **`Loggable` Protocol:** Implemented for instance-based logging with automatic context (file, line, function) and reduced boilerplate (`self.info(...)`).
+    *   **`RedEyeLogger.LogLevel`:** Defined log levels (`fault` to `trace`).
+    *   **Configurable Log Level:** `RedEyeLogger.currentLevel` set from `config.json` and updatable via IPC.
+    *   Improved organization and consistency of logging calls.
 
-6.  **Expanded Testing:**
-    *   Increase unit test coverage for new components (`ConfigurationManager`, `AppCoordinator`, `TextCaptureService`, `IPCCommandHandler` updates, filtering logic).
-    *   Introduce basic integration tests for key workflows (e.g., IPC config change affecting behavior).
+6.  **Expanded Testing: [PARTIALLY COMPLETED]**
+    *   Unit tests for `ConfigurationManager` and `MainEventBus` are in place.
+    *   Manual integration testing performed for the configuration system.
+    *   Further expansion of unit/integration tests for other new/refactored components (e.g., `AppCoordinator`, `TextCaptureService`, specific monitor logic beyond base) is deferred.
 
-7.  **Comprehensive Documentation:**
-    *   **User Documentation (`README.md`):** Installation, basic configuration via file, troubleshooting.
-    *   **Developer Documentation (`DEVELOPER_GUIDE.md`):** Project architecture, how to add new event monitors/features, testing guidelines, contribution process.
-    *   **Agent/System Integration Documentation (`IPC_REFERENCE.md`):** Detailed specification of all IPC commands (requests, responses, payloads, ACKs/NACKs), event object schemas, available event types, filter syntax, and capability discovery.
+7.  **Comprehensive Documentation: [IN PROGRESS]**
+    *   **User Documentation (`README.md`):** Updated with configuration details.
+    *   **Developer Documentation (`DEVELOPER_GUIDE.md`):** Needs creation/significant update to reflect v0.4 architecture and development patterns.
+    *   **Agent/System Integration Documentation (`IPC_REFERENCE.md`):** Drafted with all current IPC commands and event structures.
+    *   **Architecture Documentation (`Architecture.md`):** Updated for v0.4.
+    *   Project documentation now managed in `/docs` under Git.
 
-### ❌ Not in Scope for v0.4 (Examples)
+### 🔒 Permissions Required (v0.4)
+-   **Accessibility Access:** (Existing) Still required.
+*   **Input Monitoring:** (New Requirement) **Required and Implemented** by `KeyboardMonitorManager`.
+*   **Automation (Per-Application):** (New Requirement for PoC) Attempted for Safari. `NSAppleEventsUsageDescription` added. **OS-level issues prevented reliable granting for RedEye during v0.3.**
+*   **Full Disk Access:** (Potential Requirement) Awareness added for `FSEvents` if monitoring broad locations. No active requirement for default paths.
 
-*   Advanced Synthetic Event generation (beyond foundational capabilities).
+### ❌ Not in Scope for v0.4 (Final)
+*   **Server-Side Event Filtering.** (Deferred)
+*   Advanced Synthetic Event generation (beyond foundational capabilities and the experimental Safari URL capture).
 *   Complex rule engine for Compound Events within RedEye itself.
-*   UI for configuration (configuration is via files and IPC).
+*   UI for configuration (configuration remains via files and IPC).
 *   Support for IPC transports other than WebSockets.
-*   Full hierarchical/layered configuration merging (Phase 1 focuses on static file + IPC overrides).
-*   Advanced EventBus features like subscriber-specified delivery queues (beyond main-thread delivery).
+*   Full hierarchical/layered configuration merging (Phase 1 focused on static file + IPC overrides with persistence).
+*   Advanced EventBus features like subscriber-specified delivery queues.
+*   Comprehensive automated integration or UI testing.
 
 ### 💡 Future Considerations (Beyond v0.4)
-*   Phase 2 of Configuration System (hierarchical merging, more dynamic sources).
-*   Advanced Synthetic Event generation.
-*   Rule engine for Compound Events.
-*   UI for configuration and status monitoring.
-*   Support for additional IPC transports.
+*   **Server-Side Event Filtering.**
+*   **Live Configuration Reloading** for monitors/services without app restart.
+*   **Phase 2 of Configuration System** (hierarchical merging, more dynamic sources).
+*   **UI for configuration and status monitoring.**
+*   **Expanded Test Automation** (Unit, Integration, UI).
+*   **Revisit Browser URL Capture / Synthetic Events:** Investigate TCC/Automation permission issues further. Explore alternative methods for application-specific event capture if AppleScript remains problematic or too limited.
