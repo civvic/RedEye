@@ -50,6 +50,11 @@
 			path = RedEye;
 			sourceTree = "<group>";
 		};
+		1C7208D52DDDE7C30075B4B8 /* docs */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = docs;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -75,6 +80,7 @@
 		1C5875E82DCCBB4000061F5F = {
 			isa = PBXGroup;
 			children = (
+				1C7208D52DDDE7C30075B4B8 /* docs */,
 				1C5875F32DCCBB4000061F5F /* RedEye */,
 				1C3875552DD4821B0083F8F0 /* RedEyeTests */,
 				1C5875F22DCCBB4000061F5F /* Products */,
@@ -130,6 +136,7 @@
 			);
 			fileSystemSynchronizedGroups = (
 				1C5875F32DCCBB4000061F5F /* RedEye */,
+				1C7208D52DDDE7C30075B4B8 /* docs */,
 			);
 			name = RedEye;
 			packageProductDependencies = (
